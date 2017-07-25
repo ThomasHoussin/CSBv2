@@ -126,21 +126,9 @@ public:
 
 	}
 
-	int operator==(Collision &object){
-		if(this == &object) return true;
-	    return false ;
-	}
-	int operator!=(Collision &object){
-		if(this == &object) return false;
-	    return true ;
-	}
-
-	static Collision NO_COLLISION ;
 private:
 
 };
-
-Collision Collision::NO_COLLISION(NULL,NULL,2.) ;
 
 class Unit:public Point {
 public:
@@ -187,7 +175,7 @@ public:
 		throw std::logic_error("Appel à la fonction virtuelle Bounce de la classe Unit") ;
 	}
 
-	Collision collision(Unit* u) {
+	Collision* collision(Unit* u) {
 		// Square of the distance
 	    float dist = this->distanceSq(*u);
 
@@ -198,12 +186,12 @@ public:
 
 	    if (dist < sr) {
 	        // Objects are already touching each other. We have an immediate collision.
-	        return Collision(this, u, 0.0);
+	        return new Collision(this, u, 0.0);
 	    }
 
 	    // Optimisation. Objects with the same speed will never collide
 	    if (this->vx == u->vx && this->vy == u->vy) {
-	        return Collision::NO_COLLISION;
+	        return NULL;
 	    }
 
 	    // We place ourselves in the reference frame of u. u is therefore stationary and is at (0,0)
@@ -235,23 +223,23 @@ public:
 
 	        // If the point is now further away it means we are not going the right way, therefore the collision won't happen
 	        if (myp.distanceSq(p) > mypdist) {
-	            return Collision::NO_COLLISION;
+	            return NULL;
 	        }
 
 	        pdist = p.distance(myp);
 
 	        // The point of impact is further than what we can travel in one turn
 	        if (pdist > length) {
-	            return Collision::NO_COLLISION;
+	            return NULL;
 	        }
 
 	        // Time needed to reach the impact point
 	        float t = pdist / length;
 
-	        return Collision(this, u, t);
+	        return new Collision(this, u, t);
 	    }
 
-	    return Collision::NO_COLLISION;
+	    return NULL;
 	}
 
 
@@ -493,11 +481,11 @@ private:
 
 public:
 	int turn ;
-	static std::vector<Checkpoint> checkpoints ;
-	std::vector<Pod> pods ;
+	static Checkpoint checkpoints[8] ;
+	Pod pods[4] ;
 
 	Game(int laps,int checkpointCount) {
-	    turn = 0 ;
+	    turn = 1 ;
 
 		for (int i = 0; i < checkpointCount; i++) {
 	        Game::laps = laps ;
@@ -505,24 +493,21 @@ public:
 	    	int checkpointX;
 	        int checkpointY;
 	        std::cin >> checkpointX >> checkpointY; std::cin.ignore();
-	        Checkpoint c = Checkpoint(checkpointX, checkpointY) ;
-	        checkpoints.push_back(c) ;
+	        checkpoints[i] = Checkpoint(checkpointX, checkpointY) ;
 	    }
 	}
 
 	Game(const Game& g) {
 		turn = g.turn ;
 
-		for(Pod p:g.pods) {
-			Pod cp = p ;
-			pods.push_back(cp) ;
+		for(int i = 0 ; i < 4 ; i++) {
+			pods[i] = Pod(g.pods[i]) ;
 		}
 	}
 
 	void updatePods(int i, float x, float y, float vx, float vy, float angle, int nextCheckPointId) {
-		if(pods.size() < 4) {
-            Pod pod = Pod(x,y,vx,vy,angle,nextCheckPointId) ;
-            pods.push_back(pod);
+		if(turn == 1) {
+            pods[i] = Pod(x,y,vx,vy,angle,nextCheckPointId) ;
 		}
 		else {
 			Pod& pod = pods[i] ;
@@ -561,36 +546,40 @@ public:
 	    float t = 0.0;
 
 	    while (t < 1.0) {
-	        Collision& firstCollision = Collision::NO_COLLISION ;
-	        std::cerr << &Collision::NO_COLLISION << std::endl ;
-	        std::cerr << &firstCollision << std::endl ;
+	        Collision* firstCollision = NULL ;
 
 	        // We look for all the collisions that are going to occur during the turn
-	        for (int i = 0; i < static_cast<int>(pods.size()); i++) {
+	        for (int i = 0; i < 4 ; i++) {
 	            // Collision with another pod?
-	            for (int j = i + 1; j < static_cast<int>(pods.size()); j++) {
-	                Collision col = pods[i].collision(&pods[j]);
+	            for (int j = i + 1 ; j < 4 ; j++) {
+	                Collision* col = pods[i].collision(&pods[j]);
 
 	                // If the collision occurs earlier than the one we currently have we keep it
-	                if (col != Collision::NO_COLLISION && col.t + t < 1.0 && col.t < firstCollision.t) {
+	                if (col != NULL && col->t + t < 1.0 && (firstCollision == NULL || col->t < firstCollision->t)) {
 	                    firstCollision = col;
+	                }
+	                else if(col != NULL) {
+	                	delete col ;
 	                }
 	            }
 
 	            // Collision with another checkpoint?
 	            // It is unnecessary to check all checkpoints here. We only test the pod's next checkpoint.
 	            // We could look for the collisions of the pod with all the checkpoints, but if such a collision happens it wouldn't impact the game in any way
-	            Collision col = pods[i].collision(&checkpoints[pods[i].getNextCheckpointId()]);
+	            Collision* col = pods[i].collision(&checkpoints[pods[i].getNextCheckpointId()]);
 
 	            // If the collision happens earlier than the current one we keep it
-	            if (col != Collision::NO_COLLISION && col.t + t < 1.0 && col.t < firstCollision.t) {
+	            if (col != NULL && col->t + t < 1.0 && (firstCollision == NULL || col->t < firstCollision->t)) {
 	                firstCollision = col;
+	            }
+	            else if(col !=NULL){
+	            	delete col ;
 	            }
 	        }
 
-	        if (firstCollision == Collision::NO_COLLISION) {
+	        if (firstCollision == NULL) {
 	            // No collision, we can move the pods until the end of the turn
-	            for (int i = 0; i < static_cast<int>(pods.size()); i++) {
+	            for (int i = 0; i < 4 ; i++) {
 	                pods[i].move(1.0 - t);
 	            }
 
@@ -598,18 +587,19 @@ public:
 	            t = 1.0;
 	        } else {
 	            // Move the pods to reach the time `t` of the collision
-	            for (int i = 0; i < static_cast<int>(pods.size()); ++i) {
-	                pods[i].move(firstCollision.t);
+	            for (int i = 0; i < 4 ; ++i) {
+	                pods[i].move(firstCollision->t);
 	            }
 
 	            // Play out the collision
-	            firstCollision.b->bounce(*firstCollision.a) ;
+	            firstCollision->b->bounce(*firstCollision->a) ;
+	            t += firstCollision->t;
 
-	            t += firstCollision.t;
+	            delete firstCollision ;
 	        }
 	    }
 
-	    for (int i = 0; i < static_cast<int>(pods.size()); ++i) {
+	    for (int i = 0; i < 4 ; ++i) {
 	        pods[i].endTurn(Game::getCheckpointCount());
 	    }
 	}
@@ -626,7 +616,7 @@ public:
 //static variables initialization
 int Game::laps = 0 ;
 int Game::checkpointCount = 0 ;
-std::vector<Checkpoint> Game::checkpoints ;
+//Checkpoint Game::checkpoints[8] ;
 
 class IA {
 public:
