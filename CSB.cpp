@@ -253,7 +253,7 @@ protected:
 
 class Pod: public Unit {
 public:
-	Pod(float x, float y, float vx, float vy, float angle, int nextCheckpointId):
+	Pod(float x = -1., float y=-1., float vx=0., float vy=0., float angle = 0., int nextCheckpointId = -1):
 		Unit(x,y,vx,vy)
 	{
 		this->r = 400 ;
@@ -288,6 +288,8 @@ public:
 		this->timeout = 100 ;
 		this->checked ++ ;
 		this->nextCheckpointId ++ ;
+		std::cerr << "CP checked : " << this->checked << std::endl ;
+		std::cerr << "CP checked. Next Checkpoint : " << this->nextCheckpointId << std::endl ;
 	}
 
 	float computeAngle(const Point& p) {
@@ -463,7 +465,7 @@ protected:
 
 class Checkpoint: public Unit {
 public:
-	Checkpoint(float x, float y):
+	Checkpoint(float x = -1., float y = -1.):
 		Unit(x, y)
 	{
 		this->r = 200 ; //600 - 400
@@ -485,7 +487,7 @@ public:
 	Pod pods[4] ;
 
 	Game(int laps,int checkpointCount) {
-	    turn = 1 ;
+	    turn = 0 ;
 
 		for (int i = 0; i < checkpointCount; i++) {
 	        Game::laps = laps ;
@@ -518,9 +520,12 @@ public:
 			pod.setAngle(angle);
 			pod.setNextCheckpointId(nextCheckPointId);
 		}
+		std::cerr << pods[i].getNextCheckpointId() << std::endl ;
 	}
 
 	void readGame() {
+		turn ++;
+
         for (int i = 0; i < 4; i++) {
             int x; // x position of your pod
             int y; // y position of your pod
@@ -544,6 +549,7 @@ public:
 	void simulateMovement() {
 	    // This tracks the time during the turn. The goal is to reach 1.0
 	    float t = 0.0;
+	    Collision* previousCollision = NULL ;
 
 	    while (t < 1.0) {
 	        Collision* firstCollision = NULL ;
@@ -554,8 +560,15 @@ public:
 	            for (int j = i + 1 ; j < 4 ; j++) {
 	                Collision* col = pods[i].collision(&pods[j]);
 
+	                //already played collision ?
+	                //necessary t avoid infinite loops due to rounding errors
+	                if(previousCollision != NULL && col != NULL && col->t == 0 &&
+	                		col->a == previousCollision->a && col->b == previousCollision->b) {
+	                	delete col ;
+	                	continue ;
+	                }
 	                // If the collision occurs earlier than the one we currently have we keep it
-	                if (col != NULL && col->t + t < 1.0 && (firstCollision == NULL || col->t < firstCollision->t)) {
+	                else if (col != NULL && col->t + t < 1.0 && (firstCollision == NULL || col->t < firstCollision->t)) {
 	                    firstCollision = col;
 	                }
 	                else if(col != NULL) {
@@ -595,9 +608,12 @@ public:
 	            firstCollision->b->bounce(*firstCollision->a) ;
 	            t += firstCollision->t;
 
-	            delete firstCollision ;
+	            delete previousCollision ;
+	            previousCollision = firstCollision ;
 	        }
 	    }
+
+	    delete previousCollision ;
 
 	    for (int i = 0; i < 4 ; ++i) {
 	        pods[i].endTurn(Game::getCheckpointCount());
@@ -616,7 +632,7 @@ public:
 //static variables initialization
 int Game::laps = 0 ;
 int Game::checkpointCount = 0 ;
-//Checkpoint Game::checkpoints[8] ;
+Checkpoint Game::checkpoints[8] ;
 
 class IA {
 public:
