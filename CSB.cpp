@@ -5,12 +5,14 @@
 #include <vector>
 #include <string>
 #include <stdexcept>
+#include <algorithm>
 
 #define PI 3.14159265358979323846
+#define MAX_DIST 19000.0 ;
 
 class Move {
 public:
-	Move(float angle, int thrust){
+	Move(float angle = 0., int thrust=0){
 		this->angle = angle ;
 		this->thrust = thrust ;
 	}
@@ -289,7 +291,6 @@ public:
 		this->checked ++ ;
 		this->nextCheckpointId ++ ;
 		std::cerr << "CP checked : " << this->checked << std::endl ;
-		std::cerr << "CP checked. Next Checkpoint : " << this->nextCheckpointId << std::endl ;
 	}
 
 	float computeAngle(const Point& p) {
@@ -314,6 +315,26 @@ public:
 	    // The ternary operators replace the use of a modulo operator which would be slower
 	    float right = this->angle <= a ? a - this->angle : 360.0 - this->angle + a;
 	    float left = this->angle >= a ? this->angle - a : this->angle + 360.0 - a;
+
+	    if (right < left) {
+	        return right;
+	    } else {
+	        // We return a negative angle if we must rotate to left
+	        return -left;
+	    }
+	}
+
+	float diffSpeedAngle(const Point& p) {
+		if(this->vx == 0 && this->vy == 0) return 0. ;
+		//target angle
+		float a = this->computeAngle(p) ;
+		//angle given by speed vector
+		float sa = this->computeAngle(Point(x + this->vx, y + this->vy)) ;
+
+	    // To know whether we should turn clockwise or not we look at the two ways and keep the smallest
+	    // The ternary operators replace the use of a modulo operator which would be slower
+	    float right = sa <= a ? a - sa : 360.0 - sa + a;
+	    float left = sa >= a ? sa - a : sa + 360.0 - a;
 
 	    if (right < left) {
 	        return right;
@@ -455,6 +476,14 @@ public:
 	    }
 	}
 
+	int getChecked() const {
+		return checked;
+	}
+
+	float score(Point* dest) {
+		return this->getChecked() - this->distance(*dest) / MAX_DIST ;
+	}
+
 protected:
 	float angle ;
 	int nextCheckpointId ;
@@ -518,9 +547,9 @@ public:
 			pod.setVx(vx);
 			pod.setVy(vy);
 			pod.setAngle(angle);
+			if(nextCheckPointId != pod.getNextCheckpointId()) pod.checkedCP() ;
 			pod.setNextCheckpointId(nextCheckPointId);
 		}
-		std::cerr << pods[i].getNextCheckpointId() << std::endl ;
 	}
 
 	void readGame() {
@@ -636,14 +665,24 @@ Checkpoint Game::checkpoints[8] ;
 
 class IA {
 public:
-	virtual std::vector<Move> computeMoves() = 0 ;
-	virtual ~IA() { } ;
-
 	Game* game ;
 	clock_t begin ;
 
+
+	virtual std::vector<Move> computeMoves() = 0 ;
+	virtual ~IA() { } ;
+
+	IA(Game* game) {
+		this->game = game ;
+		begin = clock() ;
+	}
+
 	void resetTimer() {
 		begin = clock() ;
+	}
+
+	float getElapsedTime() {
+		return (float)(clock() - begin)/CLOCKS_PER_SEC * 1000 ;
 	}
 
 	bool timeOut() {
@@ -657,27 +696,149 @@ private :
 
 class SimpleIA : public IA {
 public:
-	SimpleIA(Game* game) {
-		this->game = game ;
-		begin = clock() ;
+	SimpleIA(Game* game, bool playOpp=false) : IA(game) {
+		if(!playOpp) {
+			myPods = game->pods ;
+			oppPods = game->pods + 2 ;
+		}
+		else {
+			myPods = game->pods +2 ;
+			oppPods = game -> pods ;
+		}
 	}
 
 	~SimpleIA() {
 
 	}
 
+	//advance to next checkpoint
+	Move computeAMove(Pod* pod) {
+		Unit* target = game->checkpoints + pod->getNextCheckpointId() ;
+
+		float speed = sqrt(pod->getVx() * pod->getVx() + pod->getVy() * pod->getVy()) ;
+		float thrust = 200 ;
+		float n = pod->distance(*target) / speed ;
+
+		//if we are close to the checkpoint, we try to go to the next one
+		if(n <= 5) {
+			//new target : next checkpoint
+			Unit* newTarget = game->checkpoints + (pod->getNextCheckpointId() + 1) % game->getCheckpointCount() ;
+			Collision* col = NULL ;
+			for(int tthrust = 200 ; tthrust >= 0 && col == NULL; tthrust-=10) {
+				Pod clone = Pod(*pod) ;
+				for(int j = 0 ; j < n ; j++) {
+					clone.rotate(*newTarget) ;
+					clone.boost(tthrust) ;
+					Collision* col = clone.collision(target) ;
+					if(col != NULL) {
+						target = newTarget ;
+						thrust = tthrust ;
+						break ;
+					}
+					else {
+						clone.move(1.0) ;
+					}
+				}
+			}
+			delete col ;
+		}
+
+		Unit& CP = *target ;
+		float angle = pod->diffAngle(CP) ;
+
+		float correction = 0. ;
+
+		if(abs(angle) <= 18. && speed != 0 && thrust != 0) {
+			correction = 2 * pod->diffSpeedAngle(CP) * thrust / speed ;
+		}
+
+		return Move(pod->diffAngle(CP) + correction, thrust) ;
+	}
+
+	//block opponent
+	Move computeBMove(Pod* pod, Pod* opp) {
+		//pod is our blocker, opp is the opponent to block
+		float dist2opp = pod->distanceSq(*opp) ;
+		Point* target = NULL ;
+		float thrust = 0 ;
+
+		//on fonce sur l'adv à proximité
+		if(dist2opp < 6000 * 6000) {
+			target = opp ;
+			thrust = 200. ;
+		}
+		//si a proximité du CP de l'adv, on attend
+		else if(pod->distanceSq(game->checkpoints[opp->getNextCheckpointId()]) < 2000 * 2000) {
+			target = opp ;
+			thrust = 0. ;
+		}
+		else if(pod->distanceSq(game->checkpoints[opp->getNextCheckpointId() + 1 % game->getCheckpointCount()]) < 2000 * 2000) {
+			target = opp ;
+			thrust = 0. ;
+		}
+		else {
+			target = game->checkpoints + (opp->getNextCheckpointId() + 1) % game->getCheckpointCount() ;
+			thrust = 100 ;
+		}
+
+		return Move(pod->diffAngle(*target),thrust) ;
+	}
+
+	//TODO : à affiner
+	bool checkCollision(Pod* p, const Move& m, Pod* o) {
+		Pod pod = Pod(*p) ;
+		pod.rotate(m.getAngle()) ;
+		pod.boost(m.getThrust()) ;
+
+		Pod opp = Pod(*o) ;
+		opp.rotate(game->checkpoints[opp.getNextCheckpointId()]) ;
+		opp.boost(200.);
+
+		Collision* col = pod.collision(&opp) ;
+		if(col != NULL) {
+			delete col ;
+			return true ;
+		}
+		return false ;
+	}
+
 	std::vector<Move> computeMoves() {
 		std::vector<Move> moves ;
-		for(int i = 0 ; i <2 ; i++) {
-			Checkpoint& CP = game->checkpoints[game->pods[i].getNextCheckpointId()] ;
-			Move m(game->pods[i].diffAngle(CP) , 100) ;
-			if(m.getAngle() > 45) m.setThrust(0) ;
-			moves.push_back(m) ;
+
+		//best opponent
+		Pod* opp = std::max(oppPods,oppPods+1,
+				[this](Pod* a,Pod* b) {
+					return a->score(game->checkpoints + a->getNextCheckpointId()) < b->score(game->checkpoints + b->getNextCheckpointId()) ;
+				}
+		);
+
+		bool firstTurn = myPods[0].getChecked() < game->getCheckpointCount() &&
+				myPods[1].getChecked() < game->getCheckpointCount() ;
+
+		float score0 = myPods[0].score(game->checkpoints + myPods[0].getNextCheckpointId()) ;
+		float score1 = myPods[1].score(game->checkpoints + myPods[1].getNextCheckpointId()) ;
+
+		if(firstTurn) {
+			moves.push_back(Move(computeAMove(myPods))) ;
+			moves.push_back(Move(computeAMove(myPods + 1))) ;
 		}
+		else if(score0 > score1) {
+			moves.push_back(Move(computeAMove(myPods))) ;
+			moves.push_back(Move(computeBMove(myPods + 1, opp))) ;
+		}
+		else {
+			moves.push_back(Move(computeBMove(myPods, opp))) ;
+			moves.push_back(Move(computeAMove(myPods + 1))) ;
+		}
+
+		if(checkCollision(myPods, moves[0], oppPods) || checkCollision(myPods, moves[0], oppPods +1)) moves[0].setThrust(-1.) ;
+		if(checkCollision(myPods+1, moves[1], oppPods) || checkCollision(myPods+1, moves[1], oppPods+1)) moves[1].setThrust(-1.) ;
+
 		return moves ;
 	}
 private:
-
+	Pod *myPods ;
+	Pod *oppPods ;
 };
 
 int main()
@@ -696,6 +857,7 @@ int main()
     	game.readGame();
 
     	std::vector<Move> moves = ia.computeMoves() ;
+    	std::cerr << "Time : " << ia.getElapsedTime() << std::endl ;
 
     	Game clone(game) ;
     	clone.simulateNextTurn(moves);
