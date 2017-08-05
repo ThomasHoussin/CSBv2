@@ -1,38 +1,53 @@
 #pragma GCC optimize "O3,omit-frame-pointer,inline,fast-math"
 
-//based on http://files.magusgeek.com/csb/csb_en.html
+//collision algorithm based on http://files.magusgeek.com/csb/csb_en.html
 
 #include <iostream>
 #include <cmath>
-#include <vector>
 #include <string>
 #include <stdexcept>
 #include <algorithm>
 #include <random>
 #include <memory>
-#include <limits>
 #include <chrono>
 
 #define PI 3.14159265358979323846
+//default max time allowed for IA computing (in ms)
+#define DEFAULT_MAX_TIME 145
 //number of moves per pod in a solution
 #define LENGTH 6
 //max distance on map, used for normalization
-#define MAX_DIST 19000.0
+#define MAX_DIST 1900.0
 //shield activation probability
 #define ASHIELD 0.1
+//probability for max and min thrust
+#define MAXTHRUSTP 0.1
+#define MINTHRUSTP 0.1
 
+
+//exponential function approximation
+inline
+float exp(float x) {
+	  x = 1.0 + x / 16.0;
+	  x *= x; x *= x; x *= x; x *= x;
+	  return x;
+}
+
+//singleton class to handle random numbers
 class Random {
 private:
-	static Random instance ;
     std::mt19937 engine ;
     std::uniform_real_distribution<float> fdistribution ;
     std::uniform_int_distribution<int> angle_distribution ;
     std::uniform_int_distribution<int> thrust_distribution ;
     std::uniform_int_distribution<int> length_distribution ;
 
+    //copies are not allowed
     Random(Random const&) {}
 	void operator=(Random const&) {}
 
+	//constructor is private
+	//getInstance is the way to get a random object (unique)
 	Random() {
 	    static std::random_device rd; // obtain a random number from hardware
 	    engine = std::mt19937(rd()); // seed the generator
@@ -94,21 +109,38 @@ public:
 		if(r.nextFloat() < ASHIELD) {
 			this->thrust = this->thrust == -1 ? r.nextRThrust() : -1 ;
 		}
+		else if(r.nextFloat() < ASHIELD + MAXTHRUSTP)
+		{
+			this->thrust = 200;
+		}
+		else if(r.nextFloat() < ASHIELD + MAXTHRUSTP + MINTHRUSTP) {
+			this->thrust = 0 ;
+		}
 		else {
-			this->thrust = r.nextRThrust();
+			this->thrust = r.nextRThrust() ;
 		}
 		this->angle = r.nextRAngle() ;
 	}
 
 	static Move randomMove() {
 		Random &r = Random::getInstance() ;
-		return Move(r.nextRAngle(), r.nextRThrust()) ;
+		float thrust ;
+		if(r.nextFloat() < ASHIELD) thrust = -1 ;
+		else thrust = r.nextRThrust() ;
+
+		return Move(r.nextRAngle(), thrust) ;
 	}
 
 private :
 	float angle; // Between -18.0 and +18.0
     int thrust; // Between -1 and 200
 };
+
+std::ostream& operator <<(std::ostream& Stream, const Move& move)
+{
+    Stream << "Angle : " << move.getAngle() << " Thrust : " << move.getThrust() ;
+    return Stream; // N'oubliez pas de renvoyer le flux, afin de pouvoir chaîner les appels
+}
 
 class Solution {
 private:
@@ -140,7 +172,7 @@ public:
 
 	void shiftLeft() {
 		std::copy(std::begin(this->solution)+1, std::end(this->solution),std::begin(this->solution)) ;
-		this->solution[LENGTH - 1] = Move::randomMove() ;
+		this->solution[LENGTH - 1] = Move(0,0) ;
 	}
 
 	static Solution* randomSolution() {
@@ -420,6 +452,7 @@ public:
 		this->nextCheckpointId ++ ;
 	}
 
+	//compute the angle that we should have to target a point
 	float computeAngle(const Point& p) {
 	    float d = this->distance(p);
 	    float dx = (p.x - this->x) / d;
@@ -435,6 +468,7 @@ public:
 	    return a;
 	}
 
+	//return the difference between the target angle and the current angle
 	float diffAngle(const Point& p) {
 	    float a = this->computeAngle(p);
 
@@ -503,15 +537,17 @@ public:
 		} else if (this->angle < 0.0) {
 		    this->angle += 360.0;
 		}
-
 	}
 
 	void boost(int thrust) {
-	  //a pod which has activated its shield cannot accelerate for 3 turns
+	    if(thrust == -1) {
+	    	this->shield = 3 ;
+	    	return;
+	    }
+		//a pod which has activated its shield cannot accelerate for 3 turns
 	    if (this->shield > 0) {
 	        return;
 	    }
-
 	    // Conversion of the angle to radiants
 	    float ra = this->angle * PI / 180.0;
 
@@ -533,7 +569,7 @@ public:
 
 	    // Don't forget that the timeout goes down by 1 each turn. It is reset to 100 when you pass a checkpoint
 	    this->timeout -= 1;
-	    if(this->shield > 0) this->shield -= 1 ;
+	    if(this->shield > 0) this->shield -- ;
 		if(this->nextCheckpointId == checkpointCount) this->nextCheckpointId = 0 ;
 	}
 
@@ -608,7 +644,7 @@ public:
 	}
 
 	float score(Point* dest) {
-		return this->getChecked() - this->distance(*dest) / MAX_DIST ;
+		return this->getChecked() * 100 - this->distance(*dest) / MAX_DIST ;
 	}
 
 protected:
@@ -644,10 +680,10 @@ public:
 
 	Game(int laps,int checkpointCount) {
 	    turn = 0 ;
+        Game::laps = laps ;
+        Game::checkpointCount = checkpointCount ;
 
 		for (int i = 0; i < checkpointCount; i++) {
-	        Game::laps = laps ;
-	        Game::checkpointCount = checkpointCount ;
 	    	int checkpointX;
 	        int checkpointY;
 	        std::cin >> checkpointX >> checkpointY; std::cin.ignore();
@@ -665,7 +701,11 @@ public:
 
 	void updatePods(int i, float x, float y, float vx, float vy, float angle, int nextCheckPointId) {
 		if(turn == 1) {
+			//on first turn, pad angle is undefined (-1) and calculated based on first direction
+			//to avoid having a different behavior on first turn, we set the angle to next CP
             pods[i] = Pod(x,y,vx,vy,angle,nextCheckPointId) ;
+			float startAngle = pods[i].computeAngle(checkpoints[pods[i].getNextCheckpointId()]) ;
+			pods[i].setAngle(startAngle) ;
 		}
 		else {
 			Pod& pod = pods[i] ;
@@ -702,6 +742,7 @@ public:
 		return laps;
 	}
 
+private:
 	void simulateMovement() {
 	    // This tracks the time during the turn. The goal is to reach 1.0
 	    float t = 0.0;
@@ -738,7 +779,7 @@ public:
 	            // Collision with another checkpoint?
 	            // It is unnecessary to check all checkpoints here. We only test the pod's next checkpoint.
 	            // We could look for the collisions of the pod with all the checkpoints, but if such a collision happens it wouldn't impact the game in any way
-	            Collision* col = pods[i].collision(&checkpoints[pods[i].getNextCheckpointId()]);
+	            Collision* col = pods[i].collision(checkpoints + pods[i].getNextCheckpointId());
 
 	            // If the collision happens earlier than the current one we keep it
 	            if (col != NULL && col->t + t < 1.0 && (firstCollision == NULL || col->t < firstCollision->t)) {
@@ -781,13 +822,14 @@ public:
 	    turn ++ ;
 	}
 
-	void simulateNextTurn(const std::vector<Move>& moves) {
+public:
+	/*void simulateNextTurn(const std::vector<Move>& moves) {
 		for(int i = 0; i < static_cast<int>(moves.size()) ; i++) {
 			this->pods[i].rotate(moves[i].getAngle());
 			this->pods[i].boost(moves[i].getThrust()) ;
 		}
 		this->simulateMovement();
-	}
+	}*/
 
 	void simulateNextTurn(const Move& move0, const Move& move1, const Move& move2, const Move& move3) {
 		this->pods[0].rotate(move0.getAngle());
@@ -827,20 +869,13 @@ public:
 		float score2 = pods[ofpi].score(checkpoints + pods[ofpi].getNextCheckpointId()) ;
 		float score3 = pods[ospi].score(checkpoints + pods[ospi].getNextCheckpointId()) ;
 
-		float result = std::max(score0,score1) - std::max(score2,score3) ;
-		int myLast = score0 > score1 ? spi : fpi ;
-		int oppBest = score2 > score3 ? ofpi : ospi ;
-
-		float blockerMalus = pods[myLast].distance(checkpoints[pods[oppBest].getNextCheckpointId()]) / (MAX_DIST) ;
-		float timeoutMalus = pods[fpi].getTimeout() <10 && pods[spi].getTimeout() < 10 ? 10 : 0 ;
-
-		return result - blockerMalus - timeoutMalus ;
+		return score0 + score1 - std::max(score2, score3) ;
 	}
 };
 
 //static variables initialization
-int Game::laps = 0 ;
-int Game::checkpointCount = 0 ;
+int Game::laps = -1 ;
+int Game::checkpointCount = -1 ;
 Checkpoint Game::checkpoints[8] ;
 
 class IA {
@@ -848,11 +883,11 @@ public:
 	Game* game ;
 	std::chrono::time_point<std::chrono::steady_clock> begin ;
 
-	virtual std::vector<Move> computeMoves() = 0 ;
+	//virtual Solution* computeSolution() = 0 ;
 	virtual ~IA() { } ;
 
-	IA(Game* game) {
-		this->game = game ;
+	IA(Game* game, int max_time = DEFAULT_MAX_TIME, bool isOpp = false) :
+		game(game), MAX_TIME(max_time), isOpp(isOpp) {
 		begin = std::chrono::steady_clock::now();
 	}
 
@@ -865,51 +900,69 @@ public:
 	}
 
 	bool timeOut() {
-		return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin).count() >= MAX_TIME ;
+		return getElapsedTime() >= MAX_TIME ;
 	}
 
-	Solution generateSolution() {
-		Solution s ;
+	/*template<class IA>
+	static Solution* generateSolution(const Game& game) {
+		Solution* s = new Solution() ;
 
-		//saving game
-		Game saved = Game(*game) ;
+		Game simulation = Game(game) ;
+		IA ia = IA(&simulation, false) ;
 
 		for(int i = 0 ; i < LENGTH ; i++) {
-			std::vector<Move> m = this->computeMoves() ;
-			s.solution[i] = m[0] ;
-			s.solution[i+LENGTH] = m[1] ;
-			game->simulateNextTurn(m) ;
+			std::vector<Move> m = ia.computeMoves() ;
+			s->solution[i] = m[0] ;
+			s->solution[i+LENGTH] = m[1] ;
+			simulation.simulateNextTurn(m) ;
 		}
-
-		//restoring game
-		this->game = &saved ;
-
 		return s;
-	}
+	}*/
 
 	template<class IA>
 	float scoreSolution(Solution& s) {
 		Game simulation = Game(*game) ;
 
-		IA ia = IA(&simulation, true) ;
-		std::vector<Move> om ;
+		IA ia = IA(&simulation, -1, isOpp) ;
+		std::unique_ptr<Move[]> om = nullptr;
 
-		for(int i = 0 ; i < LENGTH ; i++) {
-			om = ia.computeMoves() ;
-			simulation.simulateNextTurn(s.solution[i], s.solution[i+LENGTH], om[0], om[1]) ;
+		//si on ne joue pas l'adversaire
+		if(!isOpp) {
+			for(int i = 0 ; i < LENGTH ; i++) {
+				om.reset(ia.computeMoves()) ;
+				simulation.simulateNextTurn(s.solution[i], s.solution[i+LENGTH], om[0], om[1]) ;
+			}
 		}
-		s.setScore(simulation.evalGame()) ;
+		//si on joue l'adversaire : l'IA joue notre rôle, la solution est appliquée à l'adv
+		else {
+			for(int i = 0 ; i < LENGTH ; i++) {
+				om.reset(ia.computeMoves()) ;
+				simulation.simulateNextTurn(om[0], om[1],s.solution[i], s.solution[i+LENGTH]) ;
+			}
+		}
+		s.setScore(simulation.evalGame(isOpp)) ;
 		return s.getScore() ;
 	}
 
-private :
-	static const int MAX_TIME = 145 ;
+	float scoreSolution(Solution* s, Solution* os) {
+		Game simulation = Game(*game) ;
+
+		for(int i = 0 ; i < LENGTH ; i++) {
+			simulation.simulateNextTurn(s->solution[i], s->solution[i+LENGTH], os->solution[i], os->solution[i+LENGTH]) ;
+		}
+		s->setScore(simulation.evalGame(isOpp)) ;
+		return s->getScore() ;
+	}
+
+protected :
+	int MAX_TIME ;
+	bool isOpp ;
 };
 
 class SimpleIA : public IA {
 public:
-	SimpleIA(Game* game, bool playOpp=false) : IA(game) {
-		if(!playOpp) {
+	SimpleIA(Game* game, int max_time = DEFAULT_MAX_TIME, bool isOpp=false) : IA(game,max_time,isOpp) {
+		if(!isOpp) {
 			myPods = game->pods ;
 			oppPods = game->pods + 2 ;
 		}
@@ -922,7 +975,7 @@ public:
 	~SimpleIA() {
 
 	}
-
+protected:
 	//advance to next checkpoint
 	Move computeAMove(Pod* pod) {
 		Unit* target = game->checkpoints + pod->getNextCheckpointId() ;
@@ -932,6 +985,7 @@ public:
 		float n = pod->distance(*target) / speed ;
 
 		//if we are close to the checkpoint, we try to go to the next one
+		//this allows to turn before reaching checkpoint
 		if(n <= 5) {
 			//new target : next checkpoint
 			Unit* newTarget = game->checkpoints + (pod->getNextCheckpointId() + 1) % game->getCheckpointCount() ;
@@ -958,35 +1012,47 @@ public:
 		Unit& CP = *target ;
 		float angle = pod->diffAngle(CP) ;
 
+		//we try to correct the angle
+		//correction is calculated to counteract the angle between direction and speed
 		float correction = 0. ;
 
 		if(abs(angle) <= 18. && speed != 0 && thrust != 0) {
 			correction = 2 * pod->diffSpeedAngle(CP) * thrust / speed ;
 		}
 
-		return Move(pod->diffAngle(CP) + correction, thrust) ;
+		float returnAngle = pod->diffAngle(CP) + correction ;
+		if(returnAngle > 18.0) returnAngle = 18.0 ;
+		else if(returnAngle < -18.0) returnAngle = -18.0 ;
+
+		return Move(returnAngle, thrust) ;
 	}
 
 	//block opponent
 	Move computeBMove(Pod* pod, Pod* opp) {
 		//pod is our blocker, opp is the opponent to block
 		float dist2opp = pod->distanceSq(*opp) ;
+		Point oppDest = Point(opp->getX() + opp->getVx(), opp->getY() + opp->getVy()) ;
+
 		Point* target = NULL ;
 		float thrust = 0 ;
 
 		//on fonce sur l'adv à proximité
-		if(dist2opp < 6000 * 6000) {
-			target = opp ;
+		if(dist2opp < 5000 * 5000) {
+			target = &oppDest ;
 			thrust = 200. ;
 		}
 		//si a proximité du CP de l'adv, on attend
 		else if(pod->distanceSq(game->checkpoints[opp->getNextCheckpointId()]) < 2000 * 2000) {
-			target = opp ;
+			target = &oppDest ;
 			thrust = 0. ;
 		}
 		else if(pod->distanceSq(game->checkpoints[opp->getNextCheckpointId() + 1 % game->getCheckpointCount()]) < 2000 * 2000) {
-			target = opp ;
+			target = &oppDest ;
 			thrust = 0. ;
+		}
+		else if(pod->distanceSq(game->checkpoints[opp->getNextCheckpointId()]) < opp->distanceSq(game->checkpoints[opp->getNextCheckpointId()])){
+			target = game->checkpoints + opp->getNextCheckpointId() ;
+			thrust = 100 ;
 		}
 		else {
 			target = game->checkpoints + (opp->getNextCheckpointId() + 1) % game->getCheckpointCount() ;
@@ -1014,8 +1080,9 @@ public:
 		return false ;
 	}
 
-	std::vector<Move> computeMoves() {
-		std::vector<Move> moves ;
+public:
+	Move* computeMoves() {
+		Move* moves = new Move[2] ;
 
 		//best opponent
 		Pod* opp = std::max(oppPods,oppPods+1,
@@ -1031,16 +1098,17 @@ public:
 		float score1 = myPods[1].score(game->checkpoints + myPods[1].getNextCheckpointId()) ;
 
 		if(firstTurn) {
-			moves.push_back(Move(computeAMove(myPods))) ;
-			moves.push_back(Move(computeAMove(myPods + 1))) ;
+			moves[0] = computeAMove(myPods) ;
+			moves[1] = computeAMove(myPods + 1) ;
 		}
 		else if(score0 > score1) {
-			moves.push_back(Move(computeAMove(myPods))) ;
-			moves.push_back(Move(computeBMove(myPods + 1, opp))) ;
+		//if(score0 > score1) {
+			moves[0] = computeAMove(myPods) ;
+			moves[1] = computeBMove(myPods + 1, opp) ;
 		}
 		else {
-			moves.push_back(Move(computeBMove(myPods, opp))) ;
-			moves.push_back(Move(computeAMove(myPods + 1))) ;
+			moves[0] = computeBMove(myPods, opp) ;
+			moves[1] = computeAMove(myPods + 1) ;
 		}
 
 		if(checkCollision(myPods, moves[0], oppPods) || checkCollision(myPods, moves[0], oppPods +1)) moves[0].setThrust(-1.) ;
@@ -1048,9 +1116,92 @@ public:
 
 		return moves ;
 	}
-private:
+
+	Solution* computeSolution() {
+		Solution* s = new Solution() ;
+
+		//on crée une simulation, et on sauvegarde l'état courant du jeu
+		Game simulation = Game(*game) ;
+		Game* saved = this->game ;
+		this->game = &simulation ;
+
+		//simulation des tours consécutifs pour construction de la solution
+		for(int i = 0 ; i < LENGTH ; i++) {
+			std::unique_ptr<Move[]> m(this->computeMoves()) ;
+			s->solution[i] = m[0] ;
+			s->solution[i+LENGTH] = m[1] ;
+			game->simulateNextTurn(m[0], m[1], Move(0,0), Move(0,0)) ;
+		}
+
+		//on restaure l'état initial de game
+		this->game = saved ;
+
+		return s;
+	}
+protected:
 	Pod *myPods ;
 	Pod *oppPods ;
+};
+
+//IA : the two pods try to race as fast as possible
+class RaceIA : public SimpleIA {
+public:
+	RaceIA(Game* game, int max_time = DEFAULT_MAX_TIME, bool isOpp=false) : SimpleIA(game, max_time, isOpp) {
+
+	}
+	~RaceIA() { }
+
+	Move* computeMoves() {
+		Move* mtab = new Move[2] ;
+		mtab[0] = computeAMove(myPods) ;
+		mtab[1] = computeAMove(myPods + 1) ;
+
+		if(checkCollision(myPods, mtab[0], oppPods) || checkCollision(myPods, mtab[0], oppPods +1)) mtab[0].setThrust(-1.) ;
+		if(checkCollision(myPods+1, mtab[1], oppPods) || checkCollision(myPods+1, mtab[1], oppPods+1)) mtab[1].setThrust(-1.) ;
+
+		return mtab ;
+	}
+};
+
+class BlockIA : public SimpleIA {
+public:
+	BlockIA(Game* game, int max_time = DEFAULT_MAX_TIME, bool isOpp=false) : SimpleIA(game, max_time, isOpp) {
+
+	}
+	~BlockIA() { }
+
+	Move* computeMoves() {
+		//best opponent
+		Pod* opp = std::max(oppPods,oppPods+1,
+				[this](Pod* a,Pod* b) {
+					return a->score(game->checkpoints + a->getNextCheckpointId()) < b->score(game->checkpoints + b->getNextCheckpointId()) ;
+				}
+		);
+
+		Move* mtab = new Move[2] ;
+		mtab[0] = computeBMove(myPods, opp) ;
+		mtab[1] = computeBMove(myPods + 1, opp) ;
+
+		if(SimpleIA::checkCollision(myPods, mtab[0], oppPods) || checkCollision(myPods, mtab[0], oppPods +1)) mtab[0].setThrust(-1.) ;
+		if(checkCollision(myPods+1, mtab[1], oppPods) || checkCollision(myPods+1, mtab[1], oppPods+1)) mtab[1].setThrust(-1.) ;
+
+		return mtab ;
+	}
+};
+
+//IA : dummy IA that does nothing
+class NullIA : public IA {
+public:
+	NullIA(Game* game, int max_time = DEFAULT_MAX_TIME, bool playOpp=false) : IA(game) { }
+
+	Solution* computeSolution() {
+		return new Solution() ;
+	}
+
+	Move* computeMoves() {
+		return new Move[2] ;
+	}
+
 };
 
 class SAIA : public IA {
@@ -1058,41 +1209,47 @@ private:
 	const int NUM_ITERATION = 100 ; //number of iteration at each T°
 	const float alpha = 0.97 ; //temperature reduction at each iteration
 	const int INITIAL_TEMP = 100 ; //initial T°
+	const bool KEEP_BEST = true ;
 
 	std::unique_ptr<Solution> bestSolution ;
 	std::unique_ptr<Solution> currentSolution ;
 
-	bool acceptance(float oldValue, float newValue, float temp) {
+	static bool acceptance(float oldValue, float newValue, float temp) {
 		Random& r = Random::getInstance();
+		float deltaE = newValue - oldValue ;
 
-		if(newValue >= oldValue) return true ;
+		if(deltaE >= 0) return true ;
 		else {
-			//boltzmann approximation
-			float proba = 1 - (oldValue - newValue) / temp ;
-			if(r.nextFloat() < proba) return true ;
+			//boltzmann acceptance
+			if(r.nextFloat() < exp(deltaE/temp)) return true ;
 			else return false ;
 		}
 	}
 
 public:
-	SAIA(Game* game) : IA(game) {
+	SAIA(Game* game, int max_time = DEFAULT_MAX_TIME, bool isOpp=false) : IA(game, max_time,isOpp) {
 		bestSolution = nullptr ;
 		currentSolution = nullptr ;
 	}
 
-	std::vector<Move> computeMoves() {
+	Solution* computeSolution() {
 		float temp = INITIAL_TEMP ;
 
 		//initial solution building & scoring
-		if(bestSolution == nullptr) {
-			currentSolution.reset(Solution::randomSolution()) ;
-			scoreSolution<SimpleIA>(*currentSolution) ;
+		if(!KEEP_BEST || bestSolution == nullptr) {
+			//currentSolution.reset(Solution::randomSolution()) ;
+			RaceIA ia = RaceIA(game) ;
+			currentSolution.reset(ia.computeSolution()) ;
+
+			this->scoreSolution<NullIA>(*currentSolution) ;
 			bestSolution.reset(new Solution(*currentSolution)) ;
+			std::cerr << "Initial solution at temp " << temp << " with score " << bestSolution->getScore() << std::endl;
 		}
 		else {
 			bestSolution->shiftLeft() ;
-			scoreSolution<SimpleIA>(*bestSolution) ;
+			this->scoreSolution<NullIA>(*bestSolution) ;
 			currentSolution.reset(new Solution(*bestSolution)) ;
+			std::cerr << "Reusing best solution at temp " << temp << " with score " << bestSolution->getScore() << std::endl;
 		}
 
 		while(!timeOut()) {
@@ -1102,7 +1259,7 @@ public:
 				child->mutate() ;
 
 				//score the new solution against SimpleIA
-				scoreSolution<SimpleIA>(*child);
+				this->scoreSolution<NullIA>(*child);
 
 				//is new solution accepted ?
 				if(acceptance(currentSolution->getScore(), child->getScore(), temp)) {
@@ -1113,12 +1270,20 @@ public:
 					currentSolution.reset(child.release()) ;
 				}
 			}
-			//std::cerr << "Solution at temp " << temp << " with score " << bestSolution->getScore() << std::endl;
-	    	std::cerr << "Time : " << getElapsedTime() << std::endl ;
 			temp = temp * alpha ;
 		}
-		return std::vector<Move>({bestSolution->solution[0], bestSolution->solution[LENGTH]}) ;
+		std::cerr << "Best solution at temp " << temp << " with score " << bestSolution->getScore() << std::endl;
+		return bestSolution.release() ;
 	}
+
+	Move* computeMoves() {
+		std::unique_ptr<Solution> s(this->computeSolution()) ;
+		Move* moves = new Move[2] ;
+		moves[0] = s->solution[0] ;
+		moves[1] = s->solution[LENGTH] ;
+		return moves ;
+	}
+
 };
 
 int main()
@@ -1131,14 +1296,18 @@ int main()
     Game game(laps,checkpointCount) ;
     //SimpleIA ia(&game) ;
     SAIA ia(&game) ;
+    //SimpleIA ia(&game) ;
 
     // game loop
     while (1) {
     	ia.resetTimer();
     	game.readGame();
 
-    	std::vector<Move> moves = ia.computeMoves() ;
+    	std::unique_ptr<Move[]> moves(ia.computeMoves()) ;
+
     	std::cerr << "Time : " << ia.getElapsedTime() << std::endl ;
+ //   	std::cerr << "First move : " << currentSolution->solution[0] << std::endl ;
+ ///   	std::cerr << "Second move : " << currentSolution->solution[LENGTH] << std::endl ;
 
         // Write an action using cout. DON'T FORGET THE "<< endl"
         // To debug: cerr << "Debug messages..." << endl;
@@ -1146,6 +1315,7 @@ int main()
         // You have to output the target position
         // followed by the power (0 <= power <= 200)
         // i.e.: "x y power"
+
     	game.pods[0].Output(moves[0]);
     	game.pods[1].Output(moves[1]);
     }
