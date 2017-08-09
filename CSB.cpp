@@ -20,9 +20,11 @@
 //shield activation probability
 #define ASHIELD 0.1
 //probability for max and min thrust
-#define MAXTHRUSTP 0.1
-#define MINTHRUSTP 0.1
-
+#define MAXTHRUSTP 0.2
+#define MINTHRUSTP 0.2
+#define BOOSTP 0.0
+//constant for collisions
+#define EPSILON 0.00001
 
 //exponential function approximation
 inline
@@ -52,7 +54,7 @@ private:
 	    engine = std::mt19937(rd()); // seed the generator
 	    fdistribution = std::uniform_real_distribution<float>(0.0,1.0) ;
 	    angle_distribution = std::uniform_int_distribution<int>(-18,18) ;
-	    thrust_distribution = std::uniform_int_distribution<int>(0, 200) ;
+	    thrust_distribution = std::uniform_int_distribution<int>(0, 40) ;
 	    length_distribution = std::uniform_int_distribution<int>(0, 2 * LENGTH - 1) ;
 	}
 
@@ -70,7 +72,8 @@ public:
 		return angle_distribution(engine);
 	}
 	int nextRThrust() {
-		return thrust_distribution(engine);
+		//use of 5 * random(0,40) will reduce the search space without much effect on the result
+		return thrust_distribution(engine) * 5;
 	}
 	int nextRLength() {
 		return length_distribution(engine);
@@ -101,15 +104,19 @@ public:
 
 	void mutate() {
 		Random &r = Random::getInstance() ;
-		if(r.nextFloat() < ASHIELD) {
+		float p = r.nextFloat() ;
+		if(p < ASHIELD) {
 			this->thrust = this->thrust == -1 ? r.nextRThrust() : -1 ;
 		}
-		else if(r.nextFloat() < ASHIELD + MAXTHRUSTP)
+		else if(p < ASHIELD + MAXTHRUSTP)
 		{
 			this->thrust = 200;
 		}
-		else if(r.nextFloat() < ASHIELD + MAXTHRUSTP + MINTHRUSTP) {
+		else if(p < ASHIELD + MAXTHRUSTP + MINTHRUSTP) {
 			this->thrust = 0 ;
+		}
+		else if(p < ASHIELD + MAXTHRUSTP + MINTHRUSTP + BOOSTP) {
+			this->thrust = 650 ;
 		}
 		else {
 			this->thrust = r.nextRThrust() ;
@@ -118,12 +125,9 @@ public:
 	}
 
 	static Move randomMove() {
-		Random &r = Random::getInstance() ;
-		float thrust ;
-		if(r.nextFloat() < ASHIELD) thrust = -1 ;
-		else thrust = r.nextRThrust() ;
-
-		return Move(r.nextRAngle(), thrust) ;
+		Move m ;
+		m.mutate() ;
+		return m ;
 	}
 
 private :
@@ -624,8 +628,11 @@ public:
 	}
 
 	float score(Point* dest) {
-		float speedSq = (this->vx * this->vx) + (this->vy * this->vy) ;
-		return this->getChecked() * 100 - this->distanceSq(*dest) / MAX_DIST - abs(this->diffSpeedAngle(*dest)) / 180.0 + speedSq / 100000000.0 ;
+		//float speedSq = (this->vx * this->vx) + (this->vy * this->vy) ;
+		return this->getChecked() * 100 - this->distanceSq(*dest) / MAX_DIST - abs(this->diffSpeedAngle(*dest)) / 180.0  ;
+
+		/*return this->getChecked() * 100 - this->distanceSq(*dest) / MAX_DIST
+				- std::min(abs(this->diffSpeedAngle(*dest)), abs(this->diffSpeedAngle(*nDest))) / 180.0 + speedSq / 100000000.0; */
 	}
 
 	bool getBoost() const {
@@ -727,6 +734,10 @@ public:
 
 	static const int getLaps() {
 		return laps;
+	}
+
+	static int nNextCP(Pod* pod) {
+		return pod->getNextCheckpointId() == checkpointCount - 1 ? 0 : pod->getNextCheckpointId() + 1 ;
 	}
 
 private:
@@ -839,6 +850,9 @@ public:
 			simulateNextTurn(s.solution[i], s.solution[i+LENGTH], os.solution[i], os.solution[i+LENGTH]) ;
 		}
 	}
+	static float scorePod(Pod* pod){
+		return pod->score(checkpoints + pod->getNextCheckpointId()) ;
+	}
 
 	float evalGame(bool isOpp) {
 
@@ -851,10 +865,10 @@ public:
 			ospi = 1 ;
 		}
 
-		float score0 = pods[fpi].score(checkpoints + pods[fpi].getNextCheckpointId()) ;
-		float score1 = pods[spi].score(checkpoints + pods[spi].getNextCheckpointId()) ;
-		float score2 = pods[ofpi].score(checkpoints + pods[ofpi].getNextCheckpointId()) ;
-		float score3 = pods[ospi].score(checkpoints + pods[ospi].getNextCheckpointId()) ;
+		float score0 = scorePod(pods + fpi) ;
+		float score1 = scorePod(pods + spi) ;
+		float score2 = scorePod(pods + ofpi) ;
+		float score3 = scorePod(pods + ospi) ;
 
 		return score0 + score1 - std::max(score2, score3) ;
 	}
@@ -974,7 +988,7 @@ protected:
 		float correction = 0. ;
 
 		//new target : next checkpoint
-		Unit* newTarget = game->checkpoints + (pod->getNextCheckpointId() + 1) % game->getCheckpointCount() ;
+		Unit* newTarget = game->checkpoints + Game::nNextCP(pod) ;
 		float newAngle = pod->diffAngle(*newTarget) ;
 
 		//if we are close to the checkpoint, we try to go to the next one
@@ -1036,7 +1050,7 @@ protected:
 			target = &oppDest ;
 			thrust = 0. ;
 		}
-		else if(pod->distanceSq(game->checkpoints[opp->getNextCheckpointId() + 1 % game->getCheckpointCount()]) < 2000 * 2000) {
+		else if(pod->distanceSq(game->checkpoints[Game::nNextCP(opp)]) < 2000 * 2000) {
 			target = &oppDest ;
 			thrust = 0. ;
 		}
@@ -1045,7 +1059,7 @@ protected:
 			thrust = 100 ;
 		}
 		else {
-			target = game->checkpoints + (opp->getNextCheckpointId() + 1) % game->getCheckpointCount() ;
+			target = game->checkpoints + Game::nNextCP(opp) ;
 			thrust = 100 ;
 		}
 
@@ -1076,15 +1090,15 @@ public:
 		//best opponent
 		Pod* opp = std::max(oppPods,oppPods+1,
 				[this](Pod* a,Pod* b) {
-					return a->score(game->checkpoints + a->getNextCheckpointId()) < b->score(game->checkpoints + b->getNextCheckpointId()) ;
+					return Game::scorePod(a) < Game::scorePod(b) ;
 				}
 		);
 
 		bool firstTurn = myPods[0].getChecked() < game->getCheckpointCount() &&
 				myPods[1].getChecked() < game->getCheckpointCount() ;
 
-		float score0 = myPods[0].score(game->checkpoints + myPods[0].getNextCheckpointId()) ;
-		float score1 = myPods[1].score(game->checkpoints + myPods[1].getNextCheckpointId()) ;
+		float score0 = Game::scorePod(myPods) ;
+		float score1 = Game::scorePod(myPods + 1) ;
 
 		if(firstTurn) {
 			moves[0] = computeAMove(myPods) ;
@@ -1163,7 +1177,7 @@ public:
 		//best opponent
 		Pod* opp = std::max(oppPods,oppPods+1,
 				[this](Pod* a,Pod* b) {
-					return a->score(game->checkpoints + a->getNextCheckpointId()) < b->score(game->checkpoints + b->getNextCheckpointId()) ;
+					return Game::scorePod(a) < Game::scorePod(b) ;
 				}
 		);
 
@@ -1283,6 +1297,8 @@ int main()
     std::cin >> checkpointCount; std::cin.ignore();
 
     Game game(laps,checkpointCount) ;
+    std::unique_ptr<Move[]> moves ;
+
     //SimpleIA ia(&game) ;
     //RaceIA ia(&game) ;
     SAIA ia(&game) ;
@@ -1292,7 +1308,7 @@ int main()
     	game.readGame();
     	ia.resetTimer();
 
-    	std::unique_ptr<Move[]> moves(ia.computeMoves()) ;
+    	moves.reset(ia.computeMoves()) ;
 
     	std::cerr << "Time : " << ia.getElapsedTime() << std::endl ;
  //   	std::cerr << "First move : " << currentSolution->solution[0] << std::endl ;
