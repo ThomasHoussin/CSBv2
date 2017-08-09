@@ -1,4 +1,4 @@
-#pragma GCC optimize "O3,omit-frame-pointer,inline,fast-math"
+//#pragma GCC optimize "O3,omit-frame-pointer,inline,fast-math"
 
 //collision algorithm based on http://files.magusgeek.com/csb/csb_en.html
 
@@ -442,10 +442,10 @@ public:
 		this->nextCheckpointId = nextCheckPointId ;
 	}
 
-	void checkedCP() {
+	void checkedCP(int nNextCP) {
 		this->timeout = 100 ;
 		this->checked ++ ;
-		this->nextCheckpointId ++ ;
+		this->nextCheckpointId = nNextCP ;
 	}
 
 	//compute the angle that we should have to target a point
@@ -562,16 +562,15 @@ public:
 	    this->y += this->vy * t;
 	}
 
-	void endTurn(int checkpointCount) {
+	void endTurn() {
 	    this->x = round(this->x);
 	    this->y = round(this->y);
-	    this->vx = (int)(this->vx * 0.85);
-	    this->vy = (int)(this->vy * 0.85);
+	    this->vx = std::trunc(this->vx * 0.85);
+	    this->vy = std::trunc(this->vy * 0.85);
 
 	    // Don't forget that the timeout goes down by 1 each turn. It is reset to 100 when you pass a checkpoint
 	    this->timeout -= 1;
 	    if(this->shield > 0) this->shield -- ;
-		if(this->nextCheckpointId == checkpointCount) this->nextCheckpointId = 0 ;
 	}
 
 	void bounce(Unit& unit) {
@@ -618,26 +617,39 @@ public:
 		//specific test for collision at t=0
 		//this happens when the distance between units is < to r+r
 		//this is physically impossible but happens because of rounding errors
-		float diff = sqrt(nxnysquare) - (this->r + u.r) ;
+		double diff = static_cast<float>(sqrt(nxnysquare)) - (this->r + u.r) ;
 		if(diff < 0) {
-			diff = - diff / 2 + EPSILON ;
+			std::cerr << diff << std::endl ;
+			std::cerr << "1 : values before x  : " << x << " y : " << y << std::endl;
+			std::cerr << "2 : values before x : " << u.x << " y : " << u.y << std::endl;
+			std::cerr << "Error before : " << diff << std::endl ;
+			float savedx = x ;
+			float savedy = y ;
+
 			if(x > u.x) {
-				x = x + diff ;
-				u.x = u.x - diff ;
+				std::cerr << "x > u.x" << std::endl ;
+				x = x + (- diff /2 + EPSILON) ;
+				u.x = u.x - (- diff /2 + EPSILON) ;
 			}
 			else {
-				x = x - diff ;
-				u.x = u.x + diff ;
+				std::cerr << "x < u.x" << std::endl;
+				x = x - (- diff /2 + EPSILON) ;
+				u.x = u.x + (- diff /2 + EPSILON) ;
 			}
 
 			if(y > u.y) {
-				y = y + diff ;
-				u.y = u.y - diff ;
+				y = y + (- diff /2 + EPSILON) ;
+				u.y = u.y - (- diff /2 + EPSILON) ;
 			}
 			else {
-				y = y - diff ;
-				u.y = u.y + diff ;
+				y = y - (- diff /2 + EPSILON) ;
+				u.y = u.y + (- diff /2 + EPSILON) ;
 			}
+			std::cerr << "1 : values after x  : " << x << " y : " << y << std::endl;
+			std::cerr << "2 : values after x : " << u.x << " y : " << u.y << std::endl;
+			std::cerr << savedx - x << " " << savedy - y << std::endl ;
+			std::cerr << "Error after : " << this->distance(u) - (this->r + u.r) << std::endl ;
+
 		}
 	}
 
@@ -704,10 +716,6 @@ public:
 		Unit(x, y, 0, 0, 200.0)
 	{//200 = 600 - 400
 	}
-
-	void bounce(Unit& unit) {
-		((Pod&)unit).checkedCP() ;
-	}
 };
 
 class Game {
@@ -758,7 +766,7 @@ public:
     			pods[i].setAngle(startAngle) ;
             }
             else {
-            	if(nextCheckPointId != pods[i].getNextCheckpointId()) pods[i].checkedCP() ;
+            	if(nextCheckPointId != pods[i].getNextCheckpointId()) pods[i].checkedCP(this->nNextCP(pods + i)) ;
             	else pods[i].decTimeout() ;
             	pods[i].updatePod(x, y, vx, vy, angle, nextCheckPointId);
             	pods[i].decShield() ;
@@ -797,14 +805,18 @@ private:
 	                //necessary t avoid infinite loops due to rounding errors
 	                //TODO : fix if t = 0
 	                //if(col != NULL && col->t == 0) continue ;
+	                if(col != NULL && col->t == 0){
+	                	std::cerr << "Collision at t = 0 " << std::endl;
+	                }
 
-	                if(previousCollision != NULL && col != NULL && col->t == 0 &&
+	                /*if(previousCollision != NULL && col != NULL && col->t == 0 &&
 	                		col->a == previousCollision->a && col->b == previousCollision->b) {
 	                	delete col ;
 	                	continue ;
-	                }
+	                } else */
+
 	                // If the collision occurs earlier than the one we currently have we keep it
-	                else if (col != NULL && col->t + t < 1.0 && (firstCollision == NULL || col->t < firstCollision->t)) {
+	                if (col != NULL && col->t + t < 1.0 && (firstCollision == NULL || col->t < firstCollision->t)) {
 	                    firstCollision = col;
 	                }
 	                else if(col != NULL) {
@@ -819,7 +831,7 @@ private:
 		        Collision* col = pods[i].collision(checkpoints + pods[i].getNextCheckpointId());
 				// If the collision happens earlier than the current one play it
 				if (col != NULL && col->t + t < 1.0 && (firstCollision == NULL || col->t < firstCollision->t)) {
-					col->b->bounce(*col->a) ;
+					pods[i].checkedCP(this->nNextCP(pods+i)) ;
 				}
 				delete col ;
 	        }
@@ -839,6 +851,7 @@ private:
 	            }
 
 	            // Play out the collision
+            	std::cerr << "Collision at t = " << firstCollision ->t << std::endl;
 	            firstCollision->b->bounce(*firstCollision->a) ;
 	            t += firstCollision->t;
 
@@ -850,7 +863,7 @@ private:
 	    delete previousCollision ;
 
 	    for (int i = 0; i < 4 ; ++i) {
-	        pods[i].endTurn(Game::getCheckpointCount());
+	        pods[i].endTurn();
 	    }
 
 	    turn ++ ;
@@ -1044,7 +1057,7 @@ protected:
 				}
 				else {
 					clone.move(1.0) ;
-					clone.endTurn(Game::getCheckpointCount()) ;
+					clone.endTurn() ;
 				}
 			}
 		}
