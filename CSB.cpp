@@ -414,11 +414,32 @@ public:
 	}
 
 	bool isShieldActive() {
-		return this->shield == 3 ;
+		return this->shield == 4 ;
+	}
+
+	void activeShield() {
+		this->shield = 4 ;
+	}
+
+	void decShield() {
+		this->shield -- ;
+	}
+
+	void decTimeout() {
+		this->timeout -- ;
 	}
 
 	int getTimeout() {
 		return this->timeout ;
+	}
+
+	void updatePod(float x, float y, float vx, float vy, float angle, int nextCheckPointId) {
+		this->x = x ;
+		this->y = y ;
+		this->vx = vx ;
+		this->vy = vy ;
+		this->angle = angle ;
+		this->nextCheckpointId = nextCheckPointId ;
 	}
 
 	void checkedCP() {
@@ -516,7 +537,7 @@ public:
 
 	void boost(int thrust) {
 	    if(thrust == -1) {
-	    	this->shield = 3 ;
+	    	this->activeShield() ;
 	    	return;
 	    }
 	    else if(thrust == 650) {
@@ -554,7 +575,7 @@ public:
 	}
 
 	void bounce(Unit& unit) {
-		Pod& u = (Pod&)unit ;
+		Pod& u = static_cast<Pod&>(unit) ;
 
 		// If a pod has its shield active its mass is 10 otherwise it's 1
 		float m1 = this->isShieldActive() ? 10 : 1;
@@ -564,8 +585,7 @@ public:
 		float nx = this->x - u.x;
 		float ny = this->y - u.y;
 
-		// Square of the distance between the 2 pods. This value could be hardcoded because it is always 800²
-		//TODO
+		// Square of the distance between the 2 pods.
 		float nxnysquare = nx*nx + ny*ny;
 
 		float dvx = this->vx - u.vx;
@@ -594,6 +614,31 @@ public:
 		this->vy -= fy / m1;
 		u.vx += fx / m2;
 		u.vy += fy / m2;
+
+		//specific test for collision at t=0
+		//this happens when the distance between units is < to r+r
+		//this is physically impossible but happens because of rounding errors
+		float diff = sqrt(nxnysquare) - (this->r + u.r) ;
+		if(diff < 0) {
+			diff = - diff / 2 + EPSILON ;
+			if(x > u.x) {
+				x = x + diff ;
+				u.x = u.x - diff ;
+			}
+			else {
+				x = x - diff ;
+				u.x = u.x + diff ;
+			}
+
+			if(y > u.y) {
+				y = y + diff ;
+				u.y = u.y - diff ;
+			}
+			else {
+				y = y - diff ;
+				u.y = u.y + diff ;
+			}
+		}
 	}
 
 	void output(Move& move) {
@@ -612,6 +657,7 @@ public:
 	    float py = this->y + sin(a) * 10000.0;
 
 	    if (move.getThrust() == -1) {
+	    	this->activeShield() ;
 	        std::cout << round(px) << " " << round(py) << " SHIELD" << std::endl;
 	    }
 	    else if (move.getThrust() == 650) {
@@ -693,26 +739,6 @@ public:
 		}
 	}
 
-	void updatePods(int i, float x, float y, float vx, float vy, float angle, int nextCheckPointId) {
-		if(turn == 1) {
-			//on first turn, pad angle is undefined (-1) and calculated based on first direction
-			//to avoid having a different behavior on first turn, we set the angle to next CP
-            pods[i] = Pod(x,y,vx,vy,angle,nextCheckPointId) ;
-			float startAngle = pods[i].computeAngle(checkpoints[pods[i].getNextCheckpointId()]) ;
-			pods[i].setAngle(startAngle) ;
-		}
-		else {
-			Pod& pod = pods[i] ;
-			pod.setX(x);
-			pod.setY(y);
-			pod.setVx(vx);
-			pod.setVy(vy);
-			pod.setAngle(angle);
-			if(nextCheckPointId != pod.getNextCheckpointId()) pod.checkedCP() ;
-			pod.setNextCheckpointId(nextCheckPointId);
-		}
-	}
-
 	void readGame() {
 		turn ++;
 
@@ -724,7 +750,19 @@ public:
             int angle; // angle of your pod
             int nextCheckPointId; // next check point id of your pod
             std::cin >> x >> y >> vx >> vy >> angle >> nextCheckPointId; std::cin.ignore();
-            updatePods(i, x, y, vx, vy, angle, nextCheckPointId);
+            if(angle == -1) {
+    			//on first turn, pad angle is undefined (-1) and calculated based on first direction
+    			//to avoid having a different behavior on first turn, we set the angle to next CP
+                pods[i] = Pod(x,y,vx,vy,angle,nextCheckPointId) ;
+    			float startAngle = pods[i].computeAngle(checkpoints[pods[i].getNextCheckpointId()]) ;
+    			pods[i].setAngle(startAngle) ;
+            }
+            else {
+            	if(nextCheckPointId != pods[i].getNextCheckpointId()) pods[i].checkedCP() ;
+            	else pods[i].decTimeout() ;
+            	pods[i].updatePod(x, y, vx, vy, angle, nextCheckPointId);
+            	pods[i].decShield() ;
+            }
         }
 	}
 
@@ -758,7 +796,7 @@ private:
 	                //already played collision ?
 	                //necessary t avoid infinite loops due to rounding errors
 	                //TODO : fix if t = 0
-	                if(col != NULL && col->t == 0) continue ;
+	                //if(col != NULL && col->t == 0) continue ;
 
 	                if(previousCollision != NULL && col != NULL && col->t == 0 &&
 	                		col->a == previousCollision->a && col->b == previousCollision->b) {
@@ -773,19 +811,17 @@ private:
 	                	delete col ;
 	                }
 	            }
+	        }
 
-	            // Collision with another checkpoint?
-	            // It is unnecessary to check all checkpoints here. We only test the pod's next checkpoint.
-	            // We could look for the collisions of the pod with all the checkpoints, but if such a collision happens it wouldn't impact the game in any way
-	            Collision* col = pods[i].collision(checkpoints + pods[i].getNextCheckpointId());
-
-	            // If the collision happens earlier than the current one we keep it
-	            if (col != NULL && col->t + t < 1.0 && (firstCollision == NULL || col->t < firstCollision->t)) {
-	                firstCollision = col;
-	            }
-	            else if(col !=NULL){
-	            	delete col ;
-	            }
+            // Collision with checkpoints
+	        //we use another loop for collision with CP, since it has no impact on Unit movements
+	        for (int i = 0; i < 4 ; i++) {
+		        Collision* col = pods[i].collision(checkpoints + pods[i].getNextCheckpointId());
+				// If the collision happens earlier than the current one play it
+				if (col != NULL && col->t + t < 1.0 && (firstCollision == NULL || col->t < firstCollision->t)) {
+					col->b->bounce(*col->a) ;
+				}
+				delete col ;
 	        }
 
 	        if (firstCollision == NULL) {
@@ -1300,8 +1336,8 @@ int main()
     std::unique_ptr<Move[]> moves ;
 
     //SimpleIA ia(&game) ;
-    //RaceIA ia(&game) ;
-    SAIA ia(&game) ;
+    RaceIA ia(&game) ;
+    //SAIA ia(&game) ;
 
     // game loop
     while (1) {
@@ -1320,6 +1356,13 @@ int main()
         // You have to output the target position
         // followed by the power (0 <= power <= 200)
         // i.e.: "x y power"
+
+       	Game clone(game) ;
+        clone.simulateNextTurn(moves[0],moves[1],Move(0,80),Move(0,80));
+        std::cerr << "x : " << clone.pods[0].x << " y : " << clone.pods[0].y << std::endl ;
+        std::cerr << "vx : " << clone.pods[0].getVx() << " vy : " << clone.pods[0].getVy() << std::endl ;
+       	std::cerr << "x : " << clone.pods[1].x << " y : " << clone.pods[1].y << std::endl ;
+       	std::cerr << "vx : " << clone.pods[1].getVx() << " vy : " << clone.pods[1].getVy() << std::endl ;
 
     	game.pods[0].output(moves[0]);
     	game.pods[1].output(moves[1]);
