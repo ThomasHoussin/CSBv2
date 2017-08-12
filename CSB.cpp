@@ -1,16 +1,18 @@
-//#pragma GCC optimize "O3,omit-frame-pointer,inline,fast-math"
+#pragma GCC optimize "O3,omit-frame-pointer,inline,fast-math"
 
 //collision algorithm based on http://files.magusgeek.com/csb/csb_en.html
 
 #include <iostream>
-#include <cmath>
 #include <stdexcept>
 #include <algorithm>
 #include <random>
 #include <memory>
 #include <chrono>
 
-#define PI 3.14159265358979323846
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 //default max time allowed for IA computing (in ms)
 #define DEFAULT_MAX_TIME 145
 //number of moves per pod in a solution
@@ -22,13 +24,12 @@
 //probability for max and min thrust
 #define MAXTHRUSTP 0.2
 #define MINTHRUSTP 0.2
-#define BOOSTP 0.0
 //constant for collisions
 #define EPSILON 0.00001
 
 //exponential function approximation
 inline
-float exp(float x) {
+double exp(double x) {
 	  x = 1.0 + x / 16.0;
 	  x *= x; x *= x; x *= x; x *= x;
 	  return x;
@@ -38,7 +39,7 @@ float exp(float x) {
 class Random {
 private:
     std::mt19937 engine ;
-    std::uniform_real_distribution<float> fdistribution ;
+    std::uniform_real_distribution<double> fdistribution ;
     std::uniform_int_distribution<int> angle_distribution ;
     std::uniform_int_distribution<int> thrust_distribution ;
     std::uniform_int_distribution<int> length_distribution ;
@@ -52,7 +53,7 @@ private:
 	Random() {
 	    static std::random_device rd; // obtain a random number from hardware
 	    engine = std::mt19937(rd()); // seed the generator
-	    fdistribution = std::uniform_real_distribution<float>(0.0,1.0) ;
+	    fdistribution = std::uniform_real_distribution<double>(0.0,1.0) ;
 	    angle_distribution = std::uniform_int_distribution<int>(-18,18) ;
 	    thrust_distribution = std::uniform_int_distribution<int>(0, 40) ;
 	    length_distribution = std::uniform_int_distribution<int>(0, 2 * LENGTH - 1) ;
@@ -65,7 +66,7 @@ public:
 		static Random instance ;
 		return instance ;
 	}
-	float nextFloat() {
+	double nextFloat() {
 		return fdistribution(engine) ;
 	}
 	int nextRAngle() {
@@ -82,15 +83,15 @@ public:
 
 class Move {
 public:
-	Move(float angle = 0., int thrust=0) :
+	Move(double angle = 0., int thrust=0) :
 		angle(angle), thrust(thrust)
 	{ }
 
-	float getAngle() const {
+	double getAngle() const {
 		return angle;
 	}
 
-	void setAngle(float angle) {
+	void setAngle(double angle) {
 		this->angle = angle;
 	}
 
@@ -104,7 +105,7 @@ public:
 
 	void mutate() {
 		Random &r = Random::getInstance() ;
-		float p = r.nextFloat() ;
+		double p = r.nextFloat() ;
 		if(p < ASHIELD) {
 			this->thrust = this->thrust == -1 ? r.nextRThrust() : -1 ;
 		}
@@ -114,9 +115,6 @@ public:
 		}
 		else if(p < ASHIELD + MAXTHRUSTP + MINTHRUSTP) {
 			this->thrust = 0 ;
-		}
-		else if(p < ASHIELD + MAXTHRUSTP + MINTHRUSTP + BOOSTP) {
-			this->thrust = 650 ;
 		}
 		else {
 			this->thrust = r.nextRThrust() ;
@@ -131,7 +129,7 @@ public:
 	}
 
 private :
-	float angle; // Between -18.0 and +18.0
+	double angle; // Between -18.0 and +18.0
     int thrust; // Between -1 and 200
 };
 
@@ -143,15 +141,34 @@ std::ostream& operator <<(std::ostream& Stream, const Move& move)
 
 class Solution {
 private:
-	float score ;
+	double score ;
+	int savedPosition ;
+	double savedScore ;
+	Move saved ;
 
 public:
 	//LENGTH first elements : first pod
 	//LENGTH last elements : second pod
 	Move solution[2 * LENGTH] ;
+	Solution& operator=(Solution const& s) ;
 
-	Solution(bool buildRandom = false) {
-		score = std::numeric_limits<float>::lowest();
+	void save(int n) {
+		savedPosition = n ;
+		savedScore = score ;
+		saved = solution[n] ;
+	}
+
+	void restore() {
+		solution[savedPosition] = saved ;
+		score = savedScore ;
+		savedPosition = -1 ;
+	}
+
+	double getSavedScore() const {
+		return savedScore ;
+	}
+
+	Solution(bool buildRandom = false) : score(std::numeric_limits<double>::lowest()), savedPosition(-1), savedScore(0.), saved(Move(0,0)) {
 		if(buildRandom) {
 			for(int i = 0 ; i < 2* LENGTH ; i++) {
 				this->solution[i] = Move::randomMove() ;
@@ -164,8 +181,7 @@ public:
 		}
 	}
 
-	Solution(const Solution& s) {
-		this->score = s.score ;
+	Solution(const Solution& s) : score(s.score), savedPosition(s.savedPosition), savedScore(s.savedScore), saved(s.saved) {
 		std::copy(std::begin(s.solution), std::end(s.solution), std::begin(this->solution)) ;
 	}
 
@@ -184,65 +200,73 @@ public:
 
 	void mutate(){
 		Random& r = Random::getInstance() ;
-		solution[r.nextRLength()].mutate() ;
+		int l = r.nextRLength() ;
+		this->save(l);
+		solution[l].mutate() ;
 	}
 
-	float getScore() const {
+	double getScore() const {
 		return score;
 	}
 
-	void setScore(float score) {
+	void setScore(double score) {
 		this->score = score;
 	}
 };
 
+Solution& Solution::operator=(Solution const& s){
+	this->score = s.score ;
+	std::copy(std::begin(s.solution), std::end(s.solution), std::begin(this->solution)) ;
+	return *this ;
+}
+
 class Point {
 public:
-	float x ;
-	float y ;
+	double x ;
+	double y ;
 
 	Point() : x(0.), y(0.){
 	}
-	Point(float x, float y): x(x), y(y) {
+	Point(double x, double y): x(x), y(y) {
 	}
-	float distance(float x, float y) {
+	double distance(double x, double y) {
 		return sqrt((this->x - x) * (this->x - x) + (this->y - y) * (this->y - y)) ;
 	}
-	float distance(const Point &p) {
+	double distance(const Point &p) {
 		return this->distance(p.x, p.y) ;
 	}
-	float distanceSq(float x, float y) {
+	double distanceSq(double x, double y) {
 		return (this->x - x) * (this->x - x) + (this->y - y) * (this->y - y) ;
 	}
-	float distanceSq(const Point &p) {
+	double distanceSq(const Point &p) {
 		return this->distanceSq(p.x, p.y) ;
 	}
 
-	float getX() const {
+	double getX() const {
 		return x;
 	}
 
-	void setX(float x) {
+	void setX(double x) {
 		this->x = x;
 	}
 
-	float getY() const {
+	double getY() const {
 		return y;
 	}
 
-	void setY(float y) {
+	void setY(double y) {
 		this->y = y;
 	}
 
 	//It allows us to find the closest point on a line (described by two points) to another point.
 	Point closest(const Point &a, const Point &b) {
-	    float da = b.y - a.y;
-	    float db = a.x - b.x;
-	    float c1 = da*a.x + db*a.y;
-	    float c2 = -db*this->x + da*this->y;
-	    float det = da*da + db*db;
-	    float cx = 0;
-	    float cy = 0;
+	    double da = b.y - a.y;
+	    double db = a.x - b.x;
+	    double c1 = da*a.x + db*a.y;
+	    double c2 = -db*this->x + da*this->y;
+	    double det = da*da + db*db;
+	    double cx = 0;
+	    double cy = 0;
 
 	    if (det != 0) {
 	        cx = (da*c1 - db*c2) / det;
@@ -268,9 +292,9 @@ class Collision {
 public:
 	Unit* a ;
 	Unit* b;
-	float t ;
+	double t ;
 
-	Collision(Unit* a, Unit* b, float t) :
+	Collision(Unit* a, Unit* b, double t) :
 		a(a), b(b), t(t) {
 
 	}
@@ -281,33 +305,33 @@ private:
 
 class Unit:public Point {
 public:
-	Unit(float x, float y):
+	Unit(double x, double y):
 		Point(x, y),r(0), vx(0), vy(0)
 	{ }
 
 	virtual ~Unit() {}
 
-	Unit(float x, float y, float vx, float vy, float r):
+	Unit(double x, double y, double vx, double vy, double r):
 		Point(x, y), r(r), vx(vx), vy(vy)
 	{ }
 
-	float getR() const {
+	double getR() const {
 		return r;
 	}
 
-	float getVx() const {
+	double getVx() const {
 		return vx;
 	}
 
-	void setVx(float vx) {
+	void setVx(double vx) {
 		this->vx = vx;
 	}
 
-	float getVy() const {
+	double getVy() const {
 		return vy;
 	}
 
-	void setVy(float vy) {
+	void setVy(double vy) {
 		this->vy = vy;
 	}
 
@@ -317,10 +341,10 @@ public:
 
 	Collision* collision(Unit* u) {
 		// Square of the distance
-	    float dist = this->distanceSq(*u);
+	    double dist = this->distanceSq(*u);
 
 	    // Sum of the radii squared
-	    float sr = (this->r + u->r)*(this->r + u->r);
+	    double sr = (this->r + u->r)*(this->r + u->r);
 
 	    // We take everything squared to avoid calling sqrt uselessly. It is better for performances
 
@@ -335,29 +359,29 @@ public:
 	    }
 
 	    // We place ourselves in the reference frame of u. u is therefore stationary and is at (0,0)
-	    float x = this->x - u->x;
-	    float y = this->y - u->y;
+	    double x = this->x - u->x;
+	    double y = this->y - u->y;
 	    Point myp(x, y);
-	    float vx = this->vx - u->vx;
-	    float vy = this->vy - u->vy;
+	    double vx = this->vx - u->vx;
+	    double vy = this->vy - u->vy;
 	    Point up(0., 0.) ;
 
 	    // We look for the closest point to u (which is in (0,0)) on the line described by our speed vector
 	    Point p = up.closest(myp, Point(x + vx, y + vy));
 
 	    // Square of the distance between u and the closest point to u on the line described by our speed vector
-	    float pdist = up.distanceSq(p);
+	    double pdist = up.distanceSq(p);
 
 	    // Square of the distance between us and that point
-	    float mypdist = myp.distanceSq(p);
+	    double mypdist = myp.distanceSq(p);
 
 	    // If the distance between u and this line is less than the sum of the radii, there might be a collision
 	    if (pdist < sr) {
 	     // Our speed on the line
-	        float length = sqrt(vx*vx + vy*vy);
+	        double length = sqrt(vx*vx + vy*vy);
 
 	        // We move along the line to find the point of impact
-	        float backdist = sqrt(sr - pdist);
+	        double backdist = sqrt(sr - pdist);
 	        p.x = p.x - backdist * (vx / length);
 	        p.y = p.y - backdist * (vy / length);
 
@@ -374,7 +398,7 @@ public:
 	        }
 
 	        // Time needed to reach the impact point
-	        float t = pdist / length;
+	        double t = pdist / length;
 
 	        return new Collision(this, u, t);
 	    }
@@ -384,24 +408,25 @@ public:
 
 
 protected:
-	float r ;
-	float vx ;
-	float vy ;
+	double r ;
+	double vx ;
+	double vy ;
 } ;
 
 
 
 class Pod: public Unit {
 public:
-	Pod(float x = -1., float y=-1., float vx=0., float vy=0., float angle = 0., int nextCheckpointId = -1):
-		Unit(x,y,vx,vy,400.0), angle(angle), nextCheckpointId(nextCheckpointId), timeout(100), shield(0), checked(0), hasBoost(true)
+	Pod(double x = -1., double y=-1., double vx=0., double vy=0., double angle = -1, int nextCheckpointId = -1):
+		Unit(x,y,vx,vy,400.0), angle(angle), nextCheckpointId(nextCheckpointId), timeout(100), shield(0),
+		checked(0), hasBoost(true), finishTime(0)
 	{ }
 
-	float getAngle() const {
+	double getAngle() const {
 		return angle;
 	}
 
-	void setAngle(float angle) {
+	void setAngle(double angle) {
 		this->angle = angle;
 	}
 
@@ -422,7 +447,7 @@ public:
 	}
 
 	void decShield() {
-		this->shield -- ;
+		if(this->shield > 0) this->shield -- ;
 	}
 
 	void decTimeout() {
@@ -433,13 +458,22 @@ public:
 		return this->timeout ;
 	}
 
-	void updatePod(float x, float y, float vx, float vy, float angle, int nextCheckPointId) {
+	void addFinishTime(double t) {
+		this->finishTime += t ;
+	}
+
+	double getFinishTime() {
+		return this->finishTime ;
+	}
+
+	void updatePod(double x, double y, double vx, double vy, double angle, int nextCheckPointId) {
 		this->x = x ;
 		this->y = y ;
 		this->vx = vx ;
 		this->vy = vy ;
 		this->angle = angle ;
 		this->nextCheckpointId = nextCheckPointId ;
+		this->finishTime = 0 ;
 	}
 
 	void checkedCP(int nNextCP) {
@@ -449,13 +483,13 @@ public:
 	}
 
 	//compute the angle that we should have to target a point
-	float computeAngle(const Point& p) {
-	    float d = this->distance(p);
-	    float dx = (p.x - this->x) / d;
-	    float dy = (p.y - this->y) / d;
+	double computeAngle(const Point& p) {
+	    double d = this->distance(p);
+	    double dx = (p.x - this->x) / d;
+	    double dy = (p.y - this->y) / d;
 
 	    // Simple trigonometry. We multiply by 180.0 / PI to convert radiants to degrees.
-	    float a = acos(dx) * 180.0 / PI;
+	    double a = acos(dx) * 180.0 / M_PI;
 
 	    // If the point I want is below me, I have to shift the angle for it to be correct
 	    if (dy < 0) {
@@ -465,13 +499,13 @@ public:
 	}
 
 	//return the difference between the target angle and the current angle
-	float diffAngle(const Point& p) {
-	    float a = this->computeAngle(p);
+	double diffAngle(const Point& p) {
+	    double a = this->computeAngle(p);
 
 	    // To know whether we should turn clockwise or not we look at the two ways and keep the smallest
 	    // The ternary operators replace the use of a modulo operator which would be slower
-	    float right = this->angle <= a ? a - this->angle : 360.0 - this->angle + a;
-	    float left = this->angle >= a ? this->angle - a : this->angle + 360.0 - a;
+	    double right = this->angle <= a ? a - this->angle : 360.0 - this->angle + a;
+	    double left = this->angle >= a ? this->angle - a : this->angle + 360.0 - a;
 
 	    if (right < left) {
 	        return right;
@@ -481,17 +515,17 @@ public:
 	    }
 	}
 
-	float diffSpeedAngle(const Point& p) {
+	double diffSpeedAngle(const Point& p) {
 		if(this->vx == 0 && this->vy == 0) return 0. ;
 		//target angle
-		float a = this->computeAngle(p) ;
+		double a = this->computeAngle(p) ;
 		//angle given by speed vector
-		float sa = this->computeAngle(Point(x + this->vx, y + this->vy)) ;
+		double sa = this->computeAngle(Point(x + this->vx, y + this->vy)) ;
 
 	    // To know whether we should turn clockwise or not we look at the two ways and keep the smallest
 	    // The ternary operators replace the use of a modulo operator which would be slower
-	    float right = sa <= a ? a - sa : 360.0 - sa + a;
-	    float left = sa >= a ? sa - a : sa + 360.0 - a;
+	    double right = sa <= a ? a - sa : 360.0 - sa + a;
+	    double left = sa >= a ? sa - a : sa + 360.0 - a;
 
 	    if (right < left) {
 	        return right;
@@ -502,7 +536,7 @@ public:
 	}
 
 	void rotate(const Point& p) {
-	    float a = this->diffAngle(p);
+	    double a = this->diffAngle(p);
 
 	    // Can't turn by more than 18° in one turn
 	    if (a > 18.0) {
@@ -521,7 +555,7 @@ public:
 	    }
 	}
 
-	void rotate(float angle) {
+	void rotate(double angle) {
 		if(angle > 18.0) angle = 18.0 ;
 		else if(angle < -18.0) angle = -18.0 ;
 
@@ -550,14 +584,14 @@ public:
 	    }
 
 	    // Conversion of the angle to radiants
-	    float ra = this->angle * PI / 180.0;
+	    double ra = this->angle * M_PI / 180.0;
 
 	    // Trigonometry
 	    this->vx += cos(ra) * thrust;
 	    this->vy += sin(ra) * thrust;
 	}
 
-	void move(float t) {
+	void move(double t) {
 	    this->x += this->vx * t;
 	    this->y += this->vy * t;
 	}
@@ -569,31 +603,31 @@ public:
 	    this->vy = std::trunc(this->vy * 0.85);
 
 	    // Don't forget that the timeout goes down by 1 each turn. It is reset to 100 when you pass a checkpoint
-	    this->timeout -= 1;
-	    if(this->shield > 0) this->shield -- ;
+	    this->decTimeout() ;
+	    this->decShield() ;
 	}
 
 	void bounce(Unit& unit) {
 		Pod& u = static_cast<Pod&>(unit) ;
 
 		// If a pod has its shield active its mass is 10 otherwise it's 1
-		float m1 = this->isShieldActive() ? 10 : 1;
-		float m2 = u.isShieldActive() ? 10 : 1;
-		float mcoeff = (m1 + m2) / (m1 * m2);
+		double m1 = this->isShieldActive() ? 10 : 1;
+		double m2 = u.isShieldActive() ? 10 : 1;
+		double mcoeff = (m1 + m2) / (m1 * m2);
 
-		float nx = this->x - u.x;
-		float ny = this->y - u.y;
+		double nx = this->x - u.x;
+		double ny = this->y - u.y;
 
 		// Square of the distance between the 2 pods.
-		float nxnysquare = nx*nx + ny*ny;
+		double nxnysquare = nx*nx + ny*ny;
 
-		float dvx = this->vx - u.vx;
-		float dvy = this->vy - u.vy;
+		double dvx = this->vx - u.vx;
+		double dvy = this->vy - u.vy;
 
 		// fx and fy are the components of the impact vector. product is just there for optimisation purposes
-		float product = nx*dvx + ny*dvy;
-		float fx = (nx * product) / (nxnysquare * mcoeff);
-		float fy = (ny * product) / (nxnysquare * mcoeff);
+		double product = nx*dvx + ny*dvy;
+		double fx = (nx * product) / (nxnysquare * mcoeff);
+		double fy = (ny * product) / (nxnysquare * mcoeff);
 
 		// We apply the impact vector once
 		this->vx -= fx / m1;
@@ -602,7 +636,7 @@ public:
 		u.vy += fy / m2;
 
 		// If the norm of the impact vector is less than 120, we normalize it to 120
-		float impulse = sqrt(fx*fx + fy*fy);
+		double impulse = sqrt(fx*fx + fy*fy);
 		if (impulse < 120.0) {
 			fx = fx * 120.0 / impulse;
 			fy = fy * 120.0 / impulse;
@@ -613,48 +647,10 @@ public:
 		this->vy -= fy / m1;
 		u.vx += fx / m2;
 		u.vy += fy / m2;
-
-		//specific test for collision at t=0
-		//this happens when the distance between units is < to r+r
-		//this is physically impossible but happens because of rounding errors
-		double diff = static_cast<float>(sqrt(nxnysquare)) - (this->r + u.r) ;
-		if(diff < 0) {
-			std::cerr << diff << std::endl ;
-			std::cerr << "1 : values before x  : " << x << " y : " << y << std::endl;
-			std::cerr << "2 : values before x : " << u.x << " y : " << u.y << std::endl;
-			std::cerr << "Error before : " << diff << std::endl ;
-			float savedx = x ;
-			float savedy = y ;
-
-			if(x > u.x) {
-				std::cerr << "x > u.x" << std::endl ;
-				x = x + (- diff /2 + EPSILON) ;
-				u.x = u.x - (- diff /2 + EPSILON) ;
-			}
-			else {
-				std::cerr << "x < u.x" << std::endl;
-				x = x - (- diff /2 + EPSILON) ;
-				u.x = u.x + (- diff /2 + EPSILON) ;
-			}
-
-			if(y > u.y) {
-				y = y + (- diff /2 + EPSILON) ;
-				u.y = u.y - (- diff /2 + EPSILON) ;
-			}
-			else {
-				y = y - (- diff /2 + EPSILON) ;
-				u.y = u.y + (- diff /2 + EPSILON) ;
-			}
-			std::cerr << "1 : values after x  : " << x << " y : " << y << std::endl;
-			std::cerr << "2 : values after x : " << u.x << " y : " << u.y << std::endl;
-			std::cerr << savedx - x << " " << savedy - y << std::endl ;
-			std::cerr << "Error after : " << this->distance(u) - (this->r + u.r) << std::endl ;
-
-		}
 	}
 
-	void output(Move& move) {
-		float a = angle + move.getAngle();
+	void output(const Move& move) {
+		double a = angle + move.getAngle();
 
 	    if (a >= 360.0) {
 	        a = a - 360.0;
@@ -663,10 +659,10 @@ public:
 	    }
 
 	    // Look for a point corresponding to the angle we want
-	    // Multiply by 10000.0 to limit rounding errors
-	    a = a * PI / 180.0;
-	    float px = this->x + cos(a) * 10000.0;
-	    float py = this->y + sin(a) * 10000.0;
+	    // Multiply to limit rounding errors
+	    a = a * M_PI / 180.0;
+	    double px = this->x + cos(a) * 100000.0;
+	    double py = this->y + sin(a) * 100000.0;
 
 	    if (move.getThrust() == -1) {
 	    	this->activeShield() ;
@@ -677,16 +673,34 @@ public:
 	    	std::cout << round(px) << " " << round(py) << " BOOST" << std::endl;
 	    }
 		else {
-	        std::cout << round(px) << " " << round(py) <<" " << move.getThrust() << std::endl;
+			std::cout << round(px) << " " << round(py) << " " << move.getThrust() << std::endl;
 	    }
+	}
+
+	Point moveToPoint(const Move& move) {
+		double a = angle + move.getAngle();
+		 if (a >= 360.0) {
+			 a = a - 360.0;
+		 } else if (a < 0.0) {
+			 a += 360.0;
+		 }
+		 // Look for a point corresponding to the angle we want
+		 // Multiply to limit rounding errors
+		 a = a * M_PI / 180.0;
+		 double px = round(this->x + cos(a) * 100000.0);
+		 double py = round(this->y + sin(a) * 100000.0);
+
+		return Point(px,py) ;
 	}
 
 	int getChecked() const {
 		return checked;
 	}
 
-	float score(Point* dest) {
-		//float speedSq = (this->vx * this->vx) + (this->vy * this->vy) ;
+	double score(const Point* dest, const int max_checked) {
+		if(this->getChecked() == max_checked) {
+			return (max_checked +1) * 100 - this->getFinishTime() ;
+		}
 		return this->getChecked() * 100 - this->distanceSq(*dest) / MAX_DIST - abs(this->diffSpeedAngle(*dest)) / 180.0  ;
 
 		/*return this->getChecked() * 100 - this->distanceSq(*dest) / MAX_DIST
@@ -702,17 +716,18 @@ public:
 	}
 
 protected:
-	float angle ;
+	double angle ;
 	int nextCheckpointId ;
 	int timeout ;
 	int shield ;
 	int checked ;
 	bool hasBoost ;
+	double finishTime ;
 };
 
 class Checkpoint: public Unit {
 public:
-	Checkpoint(float x = -1., float y = -1.):
+	Checkpoint(double x = -1., double y = -1.):
 		Unit(x, y, 0, 0, 200.0)
 	{//200 = 600 - 400
 	}
@@ -727,6 +742,7 @@ public:
 	int turn ;
 	static Checkpoint checkpoints[8] ;
 	Pod pods[4] ;
+	Game& operator=(Game const& g) ;
 
 	Game(int laps,int checkpointCount): turn(0) {
         Game::laps = laps ;
@@ -742,9 +758,7 @@ public:
 
 	Game(const Game& g) {
 		turn = g.turn ;
-		for(int i = 0 ; i < 4 ; i++) {
-			pods[i] = Pod(g.pods[i]) ;
-		}
+		std::copy(std::begin(g.pods), std::end(g.pods), std::begin(this->pods)) ;
 	}
 
 	void readGame() {
@@ -758,11 +772,15 @@ public:
             int angle; // angle of your pod
             int nextCheckPointId; // next check point id of your pod
             std::cin >> x >> y >> vx >> vy >> angle >> nextCheckPointId; std::cin.ignore();
-            if(angle == -1) {
-    			//on first turn, pad angle is undefined (-1) and calculated based on first direction
+
+            if(pods[i].getAngle() == -1) {
+    			//if pod is not defined ; only on the first turn
+                pods[i].updatePod(x,y,vx,vy,angle,nextCheckPointId) ;
+
+            	//on first turn, pod angle is calculated based on first direction
     			//to avoid having a different behavior on first turn, we set the angle to next CP
-                pods[i] = Pod(x,y,vx,vy,angle,nextCheckPointId) ;
-    			float startAngle = pods[i].computeAngle(checkpoints[pods[i].getNextCheckpointId()]) ;
+                //warning : if p1, input angle = -1 ; if p2, angle = opponent angle
+    			double startAngle = pods[i].computeAngle(checkpoints[pods[i].getNextCheckpointId()]) ;
     			pods[i].setAngle(startAngle) ;
             }
             else {
@@ -789,7 +807,7 @@ public:
 private:
 	void simulateMovement() {
 	    // This tracks the time during the turn. The goal is to reach 1.0
-	    float t = 0.0;
+	    double t = 0.0;
 	    Collision* previousCollision = NULL ;
 
 	    while (t < 1.0) {
@@ -801,19 +819,9 @@ private:
 	            for (int j = i + 1 ; j < 4 ; j++) {
 	                Collision* col = pods[i].collision(&pods[j]);
 
-	                //already played collision ?
-	                //necessary t avoid infinite loops due to rounding errors
-	                //TODO : fix if t = 0
-	                //if(col != NULL && col->t == 0) continue ;
-	                if(col != NULL && col->t == 0){
-	                	std::cerr << "Collision at t = 0 " << std::endl;
-	                }
-
-	                /*if(previousCollision != NULL && col != NULL && col->t == 0 &&
-	                		col->a == previousCollision->a && col->b == previousCollision->b) {
-	                	delete col ;
-	                	continue ;
-	                } else */
+	                //we ignore the collision at t = 0
+	                //even with them, I can't get an exact prediction
+	                if(col != NULL && col->t == 0) continue ;
 
 	                // If the collision occurs earlier than the one we currently have we keep it
 	                if (col != NULL && col->t + t < 1.0 && (firstCollision == NULL || col->t < firstCollision->t)) {
@@ -832,6 +840,9 @@ private:
 				// If the collision happens earlier than the current one play it
 				if (col != NULL && col->t + t < 1.0 && (firstCollision == NULL || col->t < firstCollision->t)) {
 					pods[i].checkedCP(this->nNextCP(pods+i)) ;
+					//on sauvegarde le temps de franchissement du dernier CP
+					if(pods[i].getChecked() == Game::laps * Game::checkpointCount)
+							pods[i].addFinishTime(col->t + t);
 				}
 				delete col ;
 	        }
@@ -851,8 +862,12 @@ private:
 	            }
 
 	            // Play out the collision
-            	std::cerr << "Collision at t = " << firstCollision ->t << std::endl;
-	            firstCollision->b->bounce(*firstCollision->a) ;
+            	firstCollision->b->bounce(*firstCollision->a) ;
+
+            	//this is needed to handle collision at t=0
+            	//it adds a small value to avoid overlapping objects
+            	//if(firstCollision->t == 0.0) Game::correctPositions(firstCollision) ;
+
 	            t += firstCollision->t;
 
 	            delete previousCollision ;
@@ -864,21 +879,50 @@ private:
 
 	    for (int i = 0; i < 4 ; ++i) {
 	        pods[i].endTurn();
+	        //on incrémente le temps mis pour franchir la ligne d'arrivée de 1
+	        //la valeur de finish time vaut donc LENGTH toujours, sauf pour le dernier CP
+	        if(pods[i].getChecked() < Game::laps * Game::checkpointCount) pods[i].addFinishTime(1.0) ;
 	    }
 
 	    turn ++ ;
 	}
 
-public:
-	/*void simulateNextTurn(const std::vector<Move>& moves) {
-		for(int i = 0; i < static_cast<int>(moves.size()) ; i++) {
-			this->pods[i].rotate(moves[i].getAngle());
-			this->pods[i].boost(moves[i].getThrust()) ;
-		}
-		this->simulateMovement();
-	}*/
+	static void correctPositions(Collision* col) {
+		//specific test for collision at t=0
+		//this happens when the distance between units is < to r+r
+		//this is physically impossible but happens because of rounding errors
+		double diff = col->a->distance(*col->b) - (col->a->getR() + col->b->getR()) ;
+		//if(diff <= 0) {
+			std::cerr << "Error before : " << diff << std::endl ;
 
+			if(col->a->x > col->b->x) {
+				col->a->x = col->a->x + EPSILON ;
+				col->b->x = col->b->x - EPSILON ;
+			}
+			else {
+				col->a->x = col->a->x - EPSILON ;
+				col->b->x = col->b->x + EPSILON ;
+			}
+
+			if(col->a->y > col->b->y) {
+				col->a->y = col->a->y + EPSILON ;
+				col->b->y = col->b->y - EPSILON ;
+			}
+			else {
+				col->a->y = col->a->y - EPSILON ;
+				col->b->y = col->b->y + EPSILON ;
+			}
+			std::cerr << "Error after : " << col->a->distance(*col->b) - (col->a->getR() + col->b->getR()) << std::endl ;
+		//}
+	}
+
+public:
 	void simulateNextTurn(const Move& move0, const Move& move1, const Move& move2, const Move& move3) {
+		//on arrête la simulation si au moins l'un des pods est arrivé
+		/*const int max_checked = Game::laps * Game::checkpointCount ;
+		if(pods[0].getChecked() == max_checked || pods[1].getChecked() == max_checked ||
+				pods[2].getChecked() == max_checked || pods[3].getChecked() == max_checked) return ;*/
+
 		this->pods[0].rotate(move0.getAngle());
 		this->pods[0].boost(move0.getThrust()) ;
 
@@ -894,16 +938,37 @@ public:
 		this->simulateMovement();
 	}
 
+	void simulateNextTurn_ex(const Move& move0, const Move& move1, const Move& move2, const Move& move3) {
+		this->pods[0].rotate(pods[0].moveToPoint(move0));
+		this->pods[0].boost(move0.getThrust()) ;
+
+		this->pods[1].rotate(pods[1].moveToPoint(move1));
+		this->pods[1].boost(move1.getThrust()) ;
+
+		this->pods[2].rotate(pods[2].moveToPoint(move2));
+		this->pods[2].boost(move2.getThrust()) ;
+
+		this->pods[3].rotate(pods[3].moveToPoint(move3));
+		this->pods[3].boost(move3.getThrust()) ;
+
+		this->simulateMovement();
+
+        std::cerr << "x : " << pods[0].x << " y : " << pods[0].y << std::endl ;
+        std::cerr << "vx : " << pods[0].getVx()  * 0.85 << " vy : " << pods[0].getVy()  * 0.85 << std::endl ;
+       	std::cerr << "x : " << pods[1].x << " y : " << pods[1].y << std::endl ;
+       	std::cerr << "vx : " << pods[1].getVx()  * 0.85  << " vy : " << pods[1].getVy() * 0.85  << std::endl ;
+	}
+
 	void simulateSolutions(Solution& s, Solution& os) {
 		for(int i = 0 ; i < LENGTH ; i ++) {
 			simulateNextTurn(s.solution[i], s.solution[i+LENGTH], os.solution[i], os.solution[i+LENGTH]) ;
 		}
 	}
-	static float scorePod(Pod* pod){
-		return pod->score(checkpoints + pod->getNextCheckpointId()) ;
+	static double scorePod(Pod* pod){
+		return pod->score(checkpoints + pod->getNextCheckpointId(), Game::checkpointCount * Game::laps) ;
 	}
 
-	float evalGame(bool isOpp) {
+	double evalGame(bool isOpp) {
 
 		int fpi = 0, spi = 1, ofpi = 2, ospi =3 ;
 
@@ -914,14 +979,20 @@ public:
 			ospi = 1 ;
 		}
 
-		float score0 = scorePod(pods + fpi) ;
-		float score1 = scorePod(pods + spi) ;
-		float score2 = scorePod(pods + ofpi) ;
-		float score3 = scorePod(pods + ospi) ;
+		double score0 = scorePod(pods + fpi) ;
+		double score1 = scorePod(pods + spi) ;
+		double score2 = scorePod(pods + ofpi) ;
+		double score3 = scorePod(pods + ospi) ;
 
 		return score0 + score1 - std::max(score2, score3) ;
 	}
 };
+
+Game& Game::operator=(Game const& g){
+	turn = g.turn ;
+	std::copy(std::begin(g.pods), std::end(g.pods), std::begin(this->pods)) ;
+	return *this ;
+}
 
 //static variables initialization
 int Game::laps = -1 ;
@@ -945,7 +1016,7 @@ public:
 		begin = std::chrono::steady_clock::now();
 	}
 
-	float getElapsedTime() {
+	double getElapsedTime() {
 		return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin).count();
 	}
 
@@ -970,7 +1041,7 @@ public:
 	}*/
 
 	template<class IA>
-	float scoreSolution(Solution& s) {
+	double scoreSolution(Solution& s) {
 		Game simulation = Game(*game) ;
 
 		IA ia = IA(&simulation, -1, !isOpp) ;
@@ -994,7 +1065,7 @@ public:
 		return s.getScore() ;
 	}
 
-	float scoreSolution(Solution* s, Solution* os) {
+	double scoreSolution(Solution* s, Solution* os) {
 		Game simulation = Game(*game) ;
 
 		for(int i = 0 ; i < LENGTH ; i++) {
@@ -1030,15 +1101,15 @@ protected:
 	Move computeAMove(Pod* pod) {
 		Unit* target = game->checkpoints + pod->getNextCheckpointId() ;
 
-		float speed = sqrt(pod->getVx() * pod->getVx() + pod->getVy() * pod->getVy()) ;
-		float thrust = 200.0 ;
-		float n = pod->distance(*target) * 0.85 / speed ;
-		float angle = pod->diffAngle(*target) ;
-		float correction = 0. ;
+		double speed = sqrt(pod->getVx() * pod->getVx() + pod->getVy() * pod->getVy()) ;
+		double thrust = 200.0 ;
+		double n = pod->distance(*target) * 0.85 / speed ;
+		double angle = pod->diffAngle(*target) ;
+		double correction = 0. ;
 
 		//new target : next checkpoint
 		Unit* newTarget = game->checkpoints + Game::nNextCP(pod) ;
-		float newAngle = pod->diffAngle(*newTarget) ;
+		double newAngle = pod->diffAngle(*newTarget) ;
 
 		//if we are close to the checkpoint, we try to go to the next one
 		//this allows to turn before reaching checkpoint
@@ -1083,11 +1154,11 @@ protected:
 	//block opponent
 	Move computeBMove(Pod* pod, Pod* opp) {
 		//pod is our blocker, opp is the opponent to block
-		float dist2opp = pod->distanceSq(*opp) ;
+		double dist2opp = pod->distanceSq(*opp) ;
 		Point oppDest = Point(opp->getX() + opp->getVx(), opp->getY() + opp->getVy()) ;
 
-		Point* target = NULL ;
-		float thrust = 0 ;
+		Point* target = nullptr ;
+		double thrust = 0 ;
 
 		//on fonce sur l'adv à proximité
 		if(dist2opp < 5000 * 5000) {
@@ -1146,8 +1217,8 @@ public:
 		bool firstTurn = myPods[0].getChecked() < game->getCheckpointCount() &&
 				myPods[1].getChecked() < game->getCheckpointCount() ;
 
-		float score0 = Game::scorePod(myPods) ;
-		float score1 = Game::scorePod(myPods + 1) ;
+		double score0 = Game::scorePod(myPods) ;
+		double score1 = Game::scorePod(myPods + 1) ;
 
 		if(firstTurn) {
 			moves[0] = computeAMove(myPods) ;
@@ -1169,19 +1240,18 @@ public:
 		return moves ;
 	}
 
-	Solution* computeSolution() {
-		Solution* s = new Solution() ;
-
+	Solution computeSolution() {
 		//on crée une simulation, et on sauvegarde l'état courant du jeu
 		Game simulation = Game(*game) ;
 		Game* saved = this->game ;
 		this->game = &simulation ;
 
+		Solution s;
 		//simulation des tours consécutifs pour construction de la solution
 		for(int i = 0 ; i < LENGTH ; i++) {
 			std::unique_ptr<Move[]> m(this->computeMoves()) ;
-			s->solution[i] = m[0] ;
-			s->solution[i+LENGTH] = m[1] ;
+			s.solution[i] = m[0] ;
+			s.solution[i+LENGTH] = m[1] ;
 			game->simulateNextTurn(m[0], m[1], Move(0,0), Move(0,0)) ;
 		}
 
@@ -1246,8 +1316,8 @@ class NullIA : public IA {
 public:
 	NullIA(Game* game, int max_time = DEFAULT_MAX_TIME, bool playOpp=false) : IA(game) { }
 
-	Solution* computeSolution() {
-		return new Solution() ;
+	Solution computeSolution() {
+		return Solution() ;
 	}
 
 	Move* computeMoves() {
@@ -1259,16 +1329,17 @@ public:
 class SAIA : public IA {
 private:
 	const int NUM_ITERATION = 100 ; //number of iteration at each T°
-	const float alpha = 0.97 ; //temperature reduction at each iteration
+	const double alpha = 0.97 ; //temperature reduction at each iteration
 	const int INITIAL_TEMP = 100 ; //initial T°
-	const bool KEEP_BEST = true ;
+	const bool KEEP_BEST = false ;
+	long total_iterations ;
 
-	std::unique_ptr<Solution> bestSolution ;
-	std::unique_ptr<Solution> currentSolution ;
+	bool hasBestSolution ;
+	Solution bestSolution ;
 
-	static bool acceptance(float oldValue, float newValue, float temp) {
+	static bool acceptance(double oldValue, double newValue, double temp) {
 		Random& r = Random::getInstance();
-		float deltaE = newValue - oldValue ;
+		double deltaE = newValue - oldValue ;
 
 		if(deltaE >= 0) return true ;
 		else {
@@ -1280,20 +1351,28 @@ private:
 
 public:
 	SAIA(Game* game, int max_time = DEFAULT_MAX_TIME, bool isOpp=false) : IA(game, max_time,isOpp),
-			bestSolution(nullptr), currentSolution(nullptr) {
+			total_iterations(0), hasBestSolution(false), bestSolution() {
 	}
 
-	Solution* computeSolution() {
-		float temp = INITIAL_TEMP ;
+	~SAIA() {
+	}
+
+	long getTotalIterations() const {
+		return total_iterations ;
+	}
+
+	/*Solution* computeSolution() {
+		double temp = INITIAL_TEMP ;
 
 		//initial solution building & scoring
 		if(!KEEP_BEST || bestSolution == nullptr) {
 			//currentSolution.reset(Solution::randomSolution()) ;
 			RaceIA ia = RaceIA(game) ;
 			currentSolution.reset(ia.computeSolution()) ;
-
 			this->scoreSolution<NullIA>(*currentSolution) ;
+
 			bestSolution.reset(new Solution(*currentSolution)) ;
+
 			std::cerr << "Initial solution at temp " << temp << " with score " << bestSolution->getScore() << std::endl;
 		}
 		else {
@@ -1308,6 +1387,7 @@ public:
 				//creation of new solution
 				std::unique_ptr<Solution> child(new Solution(*currentSolution)) ;
 				child->mutate() ;
+				++total_iterations ;
 
 				//score the new solution against SimpleIA
 				this->scoreSolution<NullIA>(*child);
@@ -1325,13 +1405,58 @@ public:
 		}
 		std::cerr << "Best solution at temp " << temp << " with score " << bestSolution->getScore() << std::endl;
 		return bestSolution.release() ;
+	}*/
+
+	Solution computeSolution() {
+		double temp = INITIAL_TEMP ;
+
+		//initial solution building & scoring
+		if(!KEEP_BEST || !hasBestSolution) {
+			//currentSolution.reset(Solution::randomSolution()) ;
+			RaceIA ia = RaceIA(game) ;
+			bestSolution = ia.computeSolution() ;
+			this->scoreSolution<NullIA>(bestSolution);
+			std::cerr << "Initial solution at temp " << temp << " with score " << bestSolution.getScore() << std::endl;
+		}
+		else {
+			bestSolution.shiftLeft() ;
+			this->scoreSolution<NullIA>(bestSolution) ;
+			std::cerr << "Reusing best solution at temp " << temp << " with score " << bestSolution.getScore() << std::endl;
+		}
+
+		hasBestSolution = true ;
+		Solution currentSolution(bestSolution) ;
+		while(!timeOut()) {
+			for(int i = 0 ; i < NUM_ITERATION && !timeOut() ; ++i) {
+
+				//creation of new solution
+				currentSolution.mutate() ;
+				++total_iterations ;
+
+				//score the new solution against SimpleIA
+				this->scoreSolution<NullIA>(currentSolution);
+
+				//is new solution accepted ?
+				if(acceptance(currentSolution.getSavedScore(), currentSolution.getScore(), temp)) {
+					if(currentSolution.getScore() > bestSolution.getScore()) {
+						bestSolution = currentSolution ;
+					}
+				}
+				else {
+					currentSolution.restore() ;
+				}
+			}
+			temp = temp * alpha ;
+		}
+		std::cerr << "Best solution at temp " << temp << " with score " << bestSolution.getScore() << std::endl;
+		return bestSolution ;
 	}
 
 	Move* computeMoves() {
-		std::unique_ptr<Solution> s(this->computeSolution()) ;
+		Solution s = this->computeSolution() ;
 		Move* moves = new Move[2] ;
-		moves[0] = s->solution[0] ;
-		moves[1] = s->solution[LENGTH] ;
+		moves[0] = s.solution[0] ;
+		moves[1] = s.solution[LENGTH] ;
 		return moves ;
 	}
 
@@ -1346,20 +1471,21 @@ int main()
     std::cin >> checkpointCount; std::cin.ignore();
 
     Game game(laps,checkpointCount) ;
-    std::unique_ptr<Move[]> moves ;
+    Move* moves = nullptr ;
 
     //SimpleIA ia(&game) ;
-    RaceIA ia(&game) ;
-    //SAIA ia(&game) ;
+    //RaceIA ia(&game) ;
+    SAIA ia(&game) ;
 
     // game loop
     while (1) {
     	game.readGame();
     	ia.resetTimer();
-
-    	moves.reset(ia.computeMoves()) ;
+    	moves = ia.computeMoves() ;
 
     	std::cerr << "Time : " << ia.getElapsedTime() << std::endl ;
+    	std::cerr << "Average # of iterations : " << ia.getTotalIterations() / game.turn << std::endl ;
+
  //   	std::cerr << "First move : " << currentSolution->solution[0] << std::endl ;
  ///   	std::cerr << "Second move : " << currentSolution->solution[LENGTH] << std::endl ;
 
@@ -1370,14 +1496,13 @@ int main()
         // followed by the power (0 <= power <= 200)
         // i.e.: "x y power"
 
-       	Game clone(game) ;
-        clone.simulateNextTurn(moves[0],moves[1],Move(0,80),Move(0,80));
-        std::cerr << "x : " << clone.pods[0].x << " y : " << clone.pods[0].y << std::endl ;
-        std::cerr << "vx : " << clone.pods[0].getVx() << " vy : " << clone.pods[0].getVy() << std::endl ;
-       	std::cerr << "x : " << clone.pods[1].x << " y : " << clone.pods[1].y << std::endl ;
-       	std::cerr << "vx : " << clone.pods[1].getVx() << " vy : " << clone.pods[1].getVy() << std::endl ;
+//       	Game clone(game) ;
+//        clone.simulateNextTurn_ex(moves[0],moves[1],Move(0,80),Move(0,80));
 
     	game.pods[0].output(moves[0]);
     	game.pods[1].output(moves[1]);
+    	delete[] moves ;
     }
+
+    delete[] moves ;
 }
