@@ -335,10 +335,6 @@ public:
 		this->vy = vy;
 	}
 
-	virtual void bounce(Unit& unit) {
-		throw std::logic_error("Appel à la fonction virtuelle Bounce de la classe Unit") ;
-	}
-
 	Collision* collision(Unit* u) {
 		// Square of the distance
 	    double dist = this->distanceSq(*u);
@@ -607,22 +603,20 @@ public:
 	    this->decShield() ;
 	}
 
-	void bounce(Unit& unit) {
-		Pod& u = static_cast<Pod&>(unit) ;
-
+	void bounce(Pod* u) {
 		// If a pod has its shield active its mass is 10 otherwise it's 1
 		double m1 = this->isShieldActive() ? 10 : 1;
-		double m2 = u.isShieldActive() ? 10 : 1;
+		double m2 = u->isShieldActive() ? 10 : 1;
 		double mcoeff = (m1 + m2) / (m1 * m2);
 
-		double nx = this->x - u.x;
-		double ny = this->y - u.y;
+		double nx = this->x - u->x;
+		double ny = this->y - u->y;
 
 		// Square of the distance between the 2 pods.
 		double nxnysquare = nx*nx + ny*ny;
 
-		double dvx = this->vx - u.vx;
-		double dvy = this->vy - u.vy;
+		double dvx = this->vx - u->vx;
+		double dvy = this->vy - u->vy;
 
 		// fx and fy are the components of the impact vector. product is just there for optimisation purposes
 		double product = nx*dvx + ny*dvy;
@@ -632,8 +626,8 @@ public:
 		// We apply the impact vector once
 		this->vx -= fx / m1;
 		this->vy -= fy / m1;
-		u.vx += fx / m2;
-		u.vy += fy / m2;
+		u->vx += fx / m2;
+		u->vy += fy / m2;
 
 		// If the norm of the impact vector is less than 120, we normalize it to 120
 		double impulse = sqrt(fx*fx + fy*fy);
@@ -645,8 +639,8 @@ public:
 		// We apply the impact vector a second time
 		this->vx -= fx / m1;
 		this->vy -= fy / m1;
-		u.vx += fx / m2;
-		u.vy += fy / m2;
+		u->vx += fx / m2;
+		u->vy += fy / m2;
 	}
 
 	void output(const Move& move) {
@@ -808,26 +802,25 @@ private:
 	void simulateMovement() {
 	    // This tracks the time during the turn. The goal is to reach 1.0
 	    double t = 0.0;
-	    Collision* previousCollision = NULL ;
 
 	    while (t < 1.0) {
-	        Collision* firstCollision = NULL ;
+	        Collision* firstCollision = nullptr ;
 
 	        // We look for all the collisions that are going to occur during the turn
 	        for (int i = 0; i < 4 ; i++) {
 	            // Collision with another pod?
 	            for (int j = i + 1 ; j < 4 ; j++) {
-	                Collision* col = pods[i].collision(&pods[j]);
+	            	Collision* col = pods[i].collision(&pods[j]) ;
 
 	                //we ignore the collision at t = 0
 	                //even with them, I can't get an exact prediction
-	                if(col != NULL && col->t == 0) continue ;
+	                if(col != nullptr && col->t == 0) continue ;
 
 	                // If the collision occurs earlier than the one we currently have we keep it
-	                if (col != NULL && col->t + t < 1.0 && (firstCollision == NULL || col->t < firstCollision->t)) {
-	                    firstCollision = col;
+	                if (col != nullptr && col->t + t < 1.0 && (firstCollision == nullptr || col->t < firstCollision->t)) {
+	                    firstCollision = col ;
 	                }
-	                else if(col != NULL) {
+	                else {
 	                	delete col ;
 	                }
 	            }
@@ -836,9 +829,10 @@ private:
             // Collision with checkpoints
 	        //we use another loop for collision with CP, since it has no impact on Unit movements
 	        for (int i = 0; i < 4 ; i++) {
-		        Collision* col = pods[i].collision(checkpoints + pods[i].getNextCheckpointId());
+	        	Collision* col = pods[i].collision(checkpoints + pods[i].getNextCheckpointId());
+
 				// If the collision happens earlier than the current one play it
-				if (col != NULL && col->t + t < 1.0 && (firstCollision == NULL || col->t < firstCollision->t)) {
+				if (col != nullptr && col->t + t < 1.0 && (firstCollision == nullptr || col->t < firstCollision->t)) {
 					pods[i].checkedCP(this->nNextCP(pods+i)) ;
 					//on sauvegarde le temps de franchissement du dernier CP
 					if(pods[i].getChecked() == Game::laps * Game::checkpointCount)
@@ -847,7 +841,7 @@ private:
 				delete col ;
 	        }
 
-	        if (firstCollision == NULL) {
+	        if (firstCollision == nullptr) {
 	            // No collision, we can move the pods until the end of the turn
 	            for (int i = 0; i < 4 ; i++) {
 	                pods[i].move(1.0 - t);
@@ -862,20 +856,16 @@ private:
 	            }
 
 	            // Play out the collision
-            	firstCollision->b->bounce(*firstCollision->a) ;
+            	static_cast<Pod*>(firstCollision->b)->bounce(static_cast<Pod*>(firstCollision->a)) ;
 
             	//this is needed to handle collision at t=0
             	//it adds a small value to avoid overlapping objects
             	//if(firstCollision->t == 0.0) Game::correctPositions(firstCollision) ;
 
 	            t += firstCollision->t;
-
-	            delete previousCollision ;
-	            previousCollision = firstCollision ;
 	        }
+	    delete firstCollision ;
 	    }
-
-	    delete previousCollision ;
 
 	    for (int i = 0; i < 4 ; ++i) {
 	        pods[i].endTurn();
