@@ -342,8 +342,6 @@ public:
 	    // Sum of the radii squared
 	    double sr = (this->r + u->r)*(this->r + u->r);
 
-	    // We take everything squared to avoid calling sqrt uselessly. It is better for performances
-
 	    if (dist < sr) {
 	        // Objects are already touching each other. We have an immediate collision.
 	        return new Collision(this, u, 0.0);
@@ -383,7 +381,7 @@ public:
 
 	        // If the point is now further away it means we are not going the right way, therefore the collision won't happen
 	        if (myp.distanceSq(p) > mypdist) {
-	            return NULL;
+	            return nullptr;
 	        }
 
 	        pdist = p.distance(myp);
@@ -458,7 +456,7 @@ public:
 		this->finishTime += t ;
 	}
 
-	double getFinishTime() {
+	double getFinishTime() const {
 		return this->finishTime ;
 	}
 
@@ -731,6 +729,7 @@ class Game {
 private:
 	static int laps ;
 	static int checkpointCount ;
+	static int totalChecked ;
 
 public:
 	int turn ;
@@ -741,6 +740,7 @@ public:
 	Game(int laps,int checkpointCount): turn(0) {
         Game::laps = laps ;
         Game::checkpointCount = checkpointCount ;
+        Game::totalChecked = laps * checkpointCount ;
 
 		for (int i = 0; i < checkpointCount; i++) {
 	    	int checkpointX;
@@ -835,7 +835,7 @@ private:
 				if (col != nullptr && col->t + t < 1.0 && (firstCollision == nullptr || col->t < firstCollision->t)) {
 					pods[i].checkedCP(this->nNextCP(pods+i)) ;
 					//on sauvegarde le temps de franchissement du dernier CP
-					if(pods[i].getChecked() == Game::laps * Game::checkpointCount)
+					if(pods[i].getChecked() == Game::totalChecked)
 							pods[i].addFinishTime(col->t + t);
 				}
 				delete col ;
@@ -871,7 +871,7 @@ private:
 	        pods[i].endTurn();
 	        //on incrémente le temps mis pour franchir la ligne d'arrivée de 1
 	        //la valeur de finish time vaut donc LENGTH toujours, sauf pour le dernier CP
-	        if(pods[i].getChecked() < Game::laps * Game::checkpointCount) pods[i].addFinishTime(1.0) ;
+	        if(pods[i].getChecked() < Game::totalChecked) pods[i].addFinishTime(1.0) ;
 	    }
 
 	    turn ++ ;
@@ -954,12 +954,12 @@ public:
 			simulateNextTurn(s.solution[i], s.solution[i+LENGTH], os.solution[i], os.solution[i+LENGTH]) ;
 		}
 	}
+
 	static double scorePod(Pod* pod){
-		return pod->score(checkpoints + pod->getNextCheckpointId(), Game::checkpointCount * Game::laps) ;
+		return pod->score(checkpoints + pod->getNextCheckpointId(), Game::totalChecked) ;
 	}
 
 	double evalGame(bool isOpp) {
-
 		int fpi = 0, spi = 1, ofpi = 2, ospi =3 ;
 
 		if(isOpp){
@@ -987,6 +987,7 @@ Game& Game::operator=(Game const& g){
 //static variables initialization
 int Game::laps = -1 ;
 int Game::checkpointCount = -1 ;
+int Game::totalChecked = -1 ;
 Checkpoint Game::checkpoints[8] ;
 
 class IA {
@@ -1014,41 +1015,26 @@ public:
 		return getElapsedTime() >= MAX_TIME ;
 	}
 
-	/*template<class IA>
-	static Solution* generateSolution(const Game& game) {
-		Solution* s = new Solution() ;
-
-		Game simulation = Game(game) ;
-		IA ia = IA(&simulation, false) ;
-
-		for(int i = 0 ; i < LENGTH ; i++) {
-			std::vector<Move> m = ia.computeMoves() ;
-			s->solution[i] = m[0] ;
-			s->solution[i+LENGTH] = m[1] ;
-			simulation.simulateNextTurn(m) ;
-		}
-		return s;
-	}*/
-
 	template<class IA>
 	double scoreSolution(Solution& s) {
 		Game simulation = Game(*game) ;
 
 		IA ia = IA(&simulation, -1, !isOpp) ;
-		std::unique_ptr<Move[]> om = nullptr;
 
 		//si on ne joue pas l'adversaire
 		if(!isOpp) {
 			for(int i = 0 ; i < LENGTH ; i++) {
-				om.reset(ia.computeMoves()) ;
+				Move* om = ia.computeMoves() ;
 				simulation.simulateNextTurn(s.solution[i], s.solution[i+LENGTH], om[0], om[1]) ;
+				delete[] om ;
 			}
 		}
 		//si on joue l'adversaire : l'IA joue notre rôle, la solution est appliquée à l'adv
 		else {
 			for(int i = 0 ; i < LENGTH ; i++) {
-				om.reset(ia.computeMoves()) ;
+				Move* om = ia.computeMoves() ;
 				simulation.simulateNextTurn(om[0], om[1],s.solution[i], s.solution[i+LENGTH]) ;
+				delete[] om ;
 			}
 		}
 		s.setScore(simulation.evalGame(isOpp)) ;
@@ -1109,11 +1095,12 @@ protected:
 				clone.rotate(*newTarget) ;
 				//boost 0 is useless
 				//clone.boost(0.) ;
-				std::unique_ptr<Collision> col(clone.collision(target)) ;
+				Collision* col = clone.collision(target) ;
 				if(col != nullptr) {
 					target = newTarget ;
 					angle = newAngle ;
 					thrust = 0 ;
+					delete col ;
 					goto end ;
 				}
 				else {
@@ -1239,10 +1226,11 @@ public:
 		Solution s;
 		//simulation des tours consécutifs pour construction de la solution
 		for(int i = 0 ; i < LENGTH ; i++) {
-			std::unique_ptr<Move[]> m(this->computeMoves()) ;
+			Move* m(this->computeMoves()) ;
 			s.solution[i] = m[0] ;
 			s.solution[i+LENGTH] = m[1] ;
 			game->simulateNextTurn(m[0], m[1], Move(0,0), Move(0,0)) ;
+			delete[] m ;
 		}
 
 		//on restaure l'état initial de game
@@ -1350,52 +1338,6 @@ public:
 	long getTotalIterations() const {
 		return total_iterations ;
 	}
-
-	/*Solution* computeSolution() {
-		double temp = INITIAL_TEMP ;
-
-		//initial solution building & scoring
-		if(!KEEP_BEST || bestSolution == nullptr) {
-			//currentSolution.reset(Solution::randomSolution()) ;
-			RaceIA ia = RaceIA(game) ;
-			currentSolution.reset(ia.computeSolution()) ;
-			this->scoreSolution<NullIA>(*currentSolution) ;
-
-			bestSolution.reset(new Solution(*currentSolution)) ;
-
-			std::cerr << "Initial solution at temp " << temp << " with score " << bestSolution->getScore() << std::endl;
-		}
-		else {
-			bestSolution->shiftLeft() ;
-			this->scoreSolution<NullIA>(*bestSolution) ;
-			currentSolution.reset(new Solution(*bestSolution)) ;
-			std::cerr << "Reusing best solution at temp " << temp << " with score " << bestSolution->getScore() << std::endl;
-		}
-
-		while(!timeOut()) {
-			for(int i = 0 ; i < NUM_ITERATION && !timeOut() ; i++) {
-				//creation of new solution
-				std::unique_ptr<Solution> child(new Solution(*currentSolution)) ;
-				child->mutate() ;
-				++total_iterations ;
-
-				//score the new solution against SimpleIA
-				this->scoreSolution<NullIA>(*child);
-
-				//is new solution accepted ?
-				if(acceptance(currentSolution->getScore(), child->getScore(), temp)) {
-					if(child->getScore() > bestSolution->getScore()) {
-						bestSolution.reset(new Solution(*child)) ;
-					}
-					//switch to new accepted solution
-					currentSolution.reset(child.release()) ;
-				}
-			}
-			temp = temp * alpha ;
-		}
-		std::cerr << "Best solution at temp " << temp << " with score " << bestSolution->getScore() << std::endl;
-		return bestSolution.release() ;
-	}*/
 
 	Solution computeSolution() {
 		double temp = INITIAL_TEMP ;
