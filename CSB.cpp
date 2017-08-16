@@ -142,6 +142,7 @@ std::ostream& operator <<(std::ostream& Stream, const Move& move)
 class Solution {
 private:
 	double score ;
+	long serial ;
 	int savedPosition ;
 	double savedScore ;
 	Move saved ;
@@ -168,7 +169,16 @@ public:
 		return savedScore ;
 	}
 
-	Solution(bool buildRandom = false) : score(std::numeric_limits<double>::lowest()), savedPosition(-1), savedScore(0.), saved(Move(0,0)) {
+	int getSavedPosition() const {
+		return savedPosition ;
+	}
+
+	long getSerial() const {
+		return serial ;
+	}
+
+	Solution(bool buildRandom = false) : score(std::numeric_limits<double>::lowest()),
+			serial(reinterpret_cast<long>(this)), savedPosition(-1), savedScore(0.), saved(Move(0,0)) {
 		if(buildRandom) {
 			for(int i = 0 ; i < 2* LENGTH ; i++) {
 				this->solution[i] = Move::randomMove() ;
@@ -181,13 +191,14 @@ public:
 		}
 	}
 
-	Solution(const Solution& s) : score(s.score), savedPosition(s.savedPosition), savedScore(s.savedScore), saved(s.saved) {
+	Solution(const Solution& s) : score(s.score), serial(s.serial), savedPosition(s.savedPosition), savedScore(s.savedScore), saved(s.saved) {
 		std::copy(std::begin(s.solution), std::end(s.solution), std::begin(this->solution)) ;
 	}
 
 	void shiftLeft() {
 		std::copy(std::begin(this->solution)+1, std::end(this->solution),std::begin(this->solution)) ;
 		this->solution[LENGTH - 1] = Move(0,0) ;
+		serial += 100 ;
 	}
 
 	static Solution* randomSolution() {
@@ -203,6 +214,7 @@ public:
 		int l = r.nextRLength() ;
 		this->save(l);
 		solution[l].mutate() ;
+		++serial ;
 	}
 
 	double getScore() const {
@@ -216,6 +228,7 @@ public:
 
 Solution& Solution::operator=(Solution const& s){
 	this->score = s.score ;
+	this->serial = s.serial ;
 	std::copy(std::begin(s.solution), std::end(s.solution), std::begin(this->solution)) ;
 	return *this ;
 }
@@ -736,6 +749,8 @@ public:
 	static Checkpoint checkpoints[8] ;
 	Pod pods[4] ;
 	Game& operator=(Game const& g) ;
+
+	Game() : turn(0) { }
 
 	Game(int laps,int checkpointCount): turn(0) {
         Game::laps = laps ;
@@ -1315,6 +1330,9 @@ private:
 	bool hasBestSolution ;
 	Solution bestSolution ;
 
+	Game cache[LENGTH] ;
+	long savedSerial ;
+
 	static bool acceptance(double oldValue, double newValue, double temp) {
 		Random& r = Random::getInstance();
 		double deltaE = newValue - oldValue ;
@@ -1329,15 +1347,51 @@ private:
 
 public:
 	SAIA(Game* game, int max_time = DEFAULT_MAX_TIME, bool isOpp=false) : IA(game, max_time,isOpp),
-			total_iterations(0), hasBestSolution(false), bestSolution() {
+			total_iterations(0), hasBestSolution(false), bestSolution(), savedSerial(-2) {
 	}
 
-	~SAIA() {
-	}
+	~SAIA() { }
 
 	long getTotalIterations() const {
 		return total_iterations ;
 	}
+
+	template<class IA>
+	double scoreSolution(Solution& s) {
+		int begin = 0 ;
+		Game* pgame = game ;
+		if(savedSerial +1 == s.getSerial()) {
+			//the solution only differs by the mutated Move
+			begin = s.getSavedPosition() >= LENGTH ? s.getSavedPosition() - LENGTH : s.getSavedPosition() ;
+			if(begin > 0) pgame = cache + begin - 1 ;
+		}
+
+		Game simulation = Game(*pgame) ;
+		IA ia = IA(&simulation, -1, !isOpp) ;
+
+		//si on ne joue pas l'adversaire
+		if(!isOpp) {
+			for(int i = begin ; i < LENGTH ; i++) {
+				Move* om = ia.computeMoves() ;
+				simulation.simulateNextTurn(s.solution[i], s.solution[i+LENGTH], om[0], om[1]) ;
+				cache[i] = simulation ;
+				delete[] om ;
+			}
+		}
+		//si on joue l'adversaire : l'IA joue notre rôle, la solution est appliquée à l'adv
+		else {
+			for(int i = begin ; i < LENGTH ; i++) {
+				Move* om = ia.computeMoves() ;
+				simulation.simulateNextTurn(om[0], om[1],s.solution[i], s.solution[i+LENGTH]) ;
+				cache[i] = simulation ;
+				delete[] om ;
+			}
+		}
+		s.setScore(simulation.evalGame(isOpp)) ;
+		this->savedSerial = s.getSerial() ;
+		return s.getScore() ;
+	}
+
 
 	Solution computeSolution() {
 		double temp = INITIAL_TEMP ;
