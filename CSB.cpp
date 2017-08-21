@@ -1330,8 +1330,6 @@ private:
 	bool hasBestSolution ;
 	Solution bestSolution ;
 
-	Game cache[LENGTH] ;
-
 	static bool acceptance(double oldValue, double newValue, double temp) {
 		Random& r = Random::getInstance();
 		double deltaE = newValue - oldValue ;
@@ -1345,7 +1343,7 @@ private:
 	}
 
 public:
-	SAIA(Game* game, int max_time = DEFAULT_MAX_TIME, bool isOpp=false) : IA(game, max_time,isOpp),
+	SAIA(Game* game, int max_time = DEFAULT_MAX_TIME, bool isOpp=false) : IA(game, max_time, isOpp),
 			total_iterations(0), hasBestSolution(false), bestSolution() {
 	}
 
