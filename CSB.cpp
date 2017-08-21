@@ -49,10 +49,12 @@ private:
 	void operator=(Random const&) {}
 
 	//constructor is private
-	//getInstance is the way to get a random object (unique)
+	//getInstance is the way to get a Random object (unique)
 	Random() {
 	    static std::random_device rd; // obtain a random number from hardware
-	    engine = std::mt19937(rd()); // seed the generator
+	    static std::seed_seq seed{rd(), rd(), rd(), rd(), rd(), rd(), rd(), rd()}; //build seed sequence
+	    engine = std::mt19937(seed); // seed the generator
+
 	    fdistribution = std::uniform_real_distribution<double>(0.0,1.0) ;
 	    angle_distribution = std::uniform_int_distribution<int>(-18,18) ;
 	    thrust_distribution = std::uniform_int_distribution<int>(0, 40) ;
@@ -78,6 +80,13 @@ public:
 	}
 	int nextRLength() {
 		return length_distribution(engine);
+	}
+	unsigned long nextRandom() {
+		return engine() ;
+	}
+	static unsigned long nextULong() {
+		Random &r = Random::getInstance() ;
+		return r.nextRandom() ;
 	}
 };
 
@@ -142,7 +151,6 @@ std::ostream& operator <<(std::ostream& Stream, const Move& move)
 class Solution {
 private:
 	double score ;
-	long serial ;
 	int savedPosition ;
 	double savedScore ;
 	Move saved ;
@@ -173,37 +181,31 @@ public:
 		return savedPosition ;
 	}
 
-	long getSerial() const {
-		return serial ;
-	}
-
-	Solution(bool buildRandom = false) : score(std::numeric_limits<double>::lowest()),
-			serial(reinterpret_cast<long>(this)), savedPosition(-1), savedScore(0.), saved(Move(0,0)) {
+	Solution(bool buildRandom = false) : score(std::numeric_limits<double>::lowest()), savedPosition(-1), savedScore(0.), saved(Move(0,0)) {
 		if(buildRandom) {
-			for(int i = 0 ; i < 2* LENGTH ; i++) {
+			for(int i = 0 ; i < 2* LENGTH ; ++i) {
 				this->solution[i] = Move::randomMove() ;
 			}
 		}
 		else {
-			for(int i = 0 ; i < 2* LENGTH ; i++) {
+			for(int i = 0 ; i < 2* LENGTH ; ++i) {
 				this->solution[i] = Move() ;
 			}
 		}
 	}
 
-	Solution(const Solution& s) : score(s.score), serial(s.serial), savedPosition(s.savedPosition), savedScore(s.savedScore), saved(s.saved) {
-		std::copy(std::begin(s.solution), std::end(s.solution), std::begin(this->solution)) ;
+	Solution(const Solution& s) : score(s.score), savedPosition(s.savedPosition), savedScore(s.savedScore), saved(s.saved) {
+		std::copy(std::begin(s.solution), std::end(s.solution), std::begin(this->solution));
 	}
 
 	void shiftLeft() {
 		std::copy(std::begin(this->solution)+1, std::end(this->solution),std::begin(this->solution)) ;
 		this->solution[LENGTH - 1] = Move(0,0) ;
-		serial += 100 ;
 	}
 
 	static Solution* randomSolution() {
 		Solution* s = new Solution() ;
-		for(int i = 0 ; i < 2* LENGTH ; i++) {
+		for(int i = 0 ; i < 2* LENGTH ; ++i) {
 			s->solution[i] = Move::randomMove() ;
 		}
 		return s ;
@@ -214,7 +216,6 @@ public:
 		int l = r.nextRLength() ;
 		this->save(l);
 		solution[l].mutate() ;
-		++serial ;
 	}
 
 	double getScore() const {
@@ -228,7 +229,6 @@ public:
 
 Solution& Solution::operator=(Solution const& s){
 	this->score = s.score ;
-	this->serial = s.serial ;
 	std::copy(std::begin(s.solution), std::end(s.solution), std::begin(this->solution)) ;
 	return *this ;
 }
@@ -485,7 +485,7 @@ public:
 
 	void checkedCP(int nNextCP) {
 		this->timeout = 100 ;
-		this->checked ++ ;
+		++ this->checked ;
 		this->nextCheckpointId = nNextCP ;
 	}
 
@@ -757,7 +757,7 @@ public:
         Game::checkpointCount = checkpointCount ;
         Game::totalChecked = laps * checkpointCount ;
 
-		for (int i = 0; i < checkpointCount; i++) {
+		for (int i = 0; i < checkpointCount; ++i) {
 	    	int checkpointX;
 	        int checkpointY;
 	        std::cin >> checkpointX >> checkpointY; std::cin.ignore();
@@ -822,9 +822,9 @@ private:
 	        Collision* firstCollision = nullptr ;
 
 	        // We look for all the collisions that are going to occur during the turn
-	        for (int i = 0; i < 4 ; i++) {
+	        for (int i = 0; i < 4 ; ++i) {
 	            // Collision with another pod?
-	            for (int j = i + 1 ; j < 4 ; j++) {
+	            for (int j = i + 1 ; j < 4 ; ++j) {
 	            	Collision* col = pods[i].collision(&pods[j]) ;
 
 	                //we ignore the collision at t = 0
@@ -858,7 +858,7 @@ private:
 
 	        if (firstCollision == nullptr) {
 	            // No collision, we can move the pods until the end of the turn
-	            for (int i = 0; i < 4 ; i++) {
+	            for (int i = 0; i < 4 ; ++i) {
 	                pods[i].move(1.0 - t);
 	            }
 
@@ -889,7 +889,7 @@ private:
 	        if(pods[i].getChecked() < Game::totalChecked) pods[i].addFinishTime(1.0) ;
 	    }
 
-	    turn ++ ;
+	    ++turn ;
 	}
 
 	static void correctPositions(Collision* col) {
@@ -965,7 +965,7 @@ public:
 	}
 
 	void simulateSolutions(Solution& s, Solution& os) {
-		for(int i = 0 ; i < LENGTH ; i ++) {
+		for(int i = 0 ; i < LENGTH ; ++ i) {
 			simulateNextTurn(s.solution[i], s.solution[i+LENGTH], os.solution[i], os.solution[i+LENGTH]) ;
 		}
 	}
@@ -1038,7 +1038,7 @@ public:
 
 		//si on ne joue pas l'adversaire
 		if(!isOpp) {
-			for(int i = 0 ; i < LENGTH ; i++) {
+			for(int i = 0 ; i < LENGTH ; ++i) {
 				Move* om = ia.computeMoves() ;
 				simulation.simulateNextTurn(s.solution[i], s.solution[i+LENGTH], om[0], om[1]) ;
 				delete[] om ;
@@ -1046,7 +1046,7 @@ public:
 		}
 		//si on joue l'adversaire : l'IA joue notre rôle, la solution est appliquée à l'adv
 		else {
-			for(int i = 0 ; i < LENGTH ; i++) {
+			for(int i = 0 ; i < LENGTH ; ++i) {
 				Move* om = ia.computeMoves() ;
 				simulation.simulateNextTurn(om[0], om[1],s.solution[i], s.solution[i+LENGTH]) ;
 				delete[] om ;
@@ -1059,7 +1059,7 @@ public:
 	double scoreSolution(Solution* s, Solution* os) {
 		Game simulation = Game(*game) ;
 
-		for(int i = 0 ; i < LENGTH ; i++) {
+		for(int i = 0 ; i < LENGTH ; ++i) {
 			simulation.simulateNextTurn(s->solution[i], s->solution[i+LENGTH], os->solution[i], os->solution[i+LENGTH]) ;
 		}
 		s->setScore(simulation.evalGame(isOpp)) ;
@@ -1106,7 +1106,7 @@ protected:
 		//this allows to turn before reaching checkpoint
 		if(n < 3.0 && abs(newAngle) > 45 && pod->getChecked() < game->getCheckpointCount() * game->getLaps() - 1) {
 			Pod clone = Pod(*pod) ;
-			for(int j = 0 ; j < n ; j++) {
+			for(int j = 0 ; j < n ; ++j) {
 				clone.rotate(*newTarget) ;
 				//boost 0 is useless
 				//clone.boost(0.) ;
@@ -1240,7 +1240,7 @@ public:
 
 		Solution s;
 		//simulation des tours consécutifs pour construction de la solution
-		for(int i = 0 ; i < LENGTH ; i++) {
+		for(int i = 0 ; i < LENGTH ; ++i) {
 			Move* m(this->computeMoves()) ;
 			s.solution[i] = m[0] ;
 			s.solution[i+LENGTH] = m[1] ;
@@ -1331,7 +1331,6 @@ private:
 	Solution bestSolution ;
 
 	Game cache[LENGTH] ;
-	long savedSerial ;
 
 	static bool acceptance(double oldValue, double newValue, double temp) {
 		Random& r = Random::getInstance();
@@ -1347,7 +1346,7 @@ private:
 
 public:
 	SAIA(Game* game, int max_time = DEFAULT_MAX_TIME, bool isOpp=false) : IA(game, max_time,isOpp),
-			total_iterations(0), hasBestSolution(false), bestSolution(), savedSerial(-2) {
+			total_iterations(0), hasBestSolution(false), bestSolution() {
 	}
 
 	~SAIA() { }
@@ -1356,13 +1355,19 @@ public:
 		return total_iterations ;
 	}
 
-	template<class IA>
+	/*
+	template<class IA, bool useCache>
 	double scoreSolution(Solution& s) {
 		int begin = 0 ;
 		Game* pgame = game ;
-		if(savedSerial +1 == s.getSerial()) {
+		if(useCache) {
 			//the solution only differs by the mutated Move
 			begin = s.getSavedPosition() >= LENGTH ? s.getSavedPosition() - LENGTH : s.getSavedPosition() ;
+			int minCache = s.getMinCache() >= LENGTH ? s.getMinCache() - LENGTH : s.getMinCache() ;
+			if(minCache < begin) {
+				begin = minCache ;
+				s.resetMinCache() ;
+			}
 			if(begin > 0) pgame = cache + begin - 1 ;
 		}
 
@@ -1371,7 +1376,7 @@ public:
 
 		//si on ne joue pas l'adversaire
 		if(!isOpp) {
-			for(int i = begin ; i < LENGTH ; i++) {
+			for(int i = begin ; i < LENGTH ; ++i) {
 				Move* om = ia.computeMoves() ;
 				simulation.simulateNextTurn(s.solution[i], s.solution[i+LENGTH], om[0], om[1]) ;
 				cache[i] = simulation ;
@@ -1380,7 +1385,7 @@ public:
 		}
 		//si on joue l'adversaire : l'IA joue notre rôle, la solution est appliquée à l'adv
 		else {
-			for(int i = begin ; i < LENGTH ; i++) {
+			for(int i = begin ; i < LENGTH ; ++i) {
 				Move* om = ia.computeMoves() ;
 				simulation.simulateNextTurn(om[0], om[1],s.solution[i], s.solution[i+LENGTH]) ;
 				cache[i] = simulation ;
@@ -1388,9 +1393,9 @@ public:
 			}
 		}
 		s.setScore(simulation.evalGame(isOpp)) ;
-		this->savedSerial = s.getSerial() ;
+
 		return s.getScore() ;
-	}
+	}*/
 
 
 	Solution computeSolution() {
@@ -1412,6 +1417,7 @@ public:
 
 		hasBestSolution = true ;
 		Solution currentSolution(bestSolution) ;
+
 		while(!timeOut()) {
 			for(int i = 0 ; i < NUM_ITERATION && !timeOut() ; ++i) {
 
