@@ -75,7 +75,7 @@ public:
 		return angle_distribution(engine);
 	}
 	int nextRThrust() {
-		//use of 5 * random(0,40) will reduce the search space without much effect on the result
+		//use of 5 * random(0,40) should reduce the search space without much effect on the result
 		return thrust_distribution(engine) * 5;
 	}
 	int nextRLength() {
@@ -83,10 +83,6 @@ public:
 	}
 	unsigned long nextRandom() {
 		return engine() ;
-	}
-	static unsigned long nextULong() {
-		Random &r = Random::getInstance() ;
-		return r.nextRandom() ;
 	}
 };
 
@@ -242,13 +238,13 @@ public:
 	}
 	Point(double x, double y): x(x), y(y) {
 	}
-	double distance(double x, double y) {
+	double distance(double x, double y) const {
 		return sqrt((this->x - x) * (this->x - x) + (this->y - y) * (this->y - y)) ;
 	}
 	double distance(const Point &p) {
 		return this->distance(p.x, p.y) ;
 	}
-	double distanceSq(double x, double y) {
+	double distanceSq(double x, double y) const {
 		return (this->x - x) * (this->x - x) + (this->y - y) * (this->y - y) ;
 	}
 	double distanceSq(const Point &p) {
@@ -445,7 +441,7 @@ public:
 		this->nextCheckpointId = nextCheckpointId;
 	}
 
-	bool isShieldActive() {
+	bool isShieldActive() const {
 		return this->shield == 4 ;
 	}
 
@@ -461,7 +457,7 @@ public:
 		this->timeout -- ;
 	}
 
-	int getTimeout() {
+	int getTimeout() const {
 		return this->timeout ;
 	}
 
@@ -964,12 +960,6 @@ public:
        	std::cerr << "vx : " << pods[1].getVx()  * 0.85  << " vy : " << pods[1].getVy() * 0.85  << std::endl ;
 	}
 
-	void simulateSolutions(Solution& s, Solution& os) {
-		for(int i = 0 ; i < LENGTH ; ++ i) {
-			simulateNextTurn(s.solution[i], s.solution[i+LENGTH], os.solution[i], os.solution[i+LENGTH]) ;
-		}
-	}
-
 	static double scorePod(Pod* pod){
 		return pod->score(checkpoints + pod->getNextCheckpointId(), Game::totalChecked) ;
 	}
@@ -1030,40 +1020,14 @@ public:
 		return getElapsedTime() >= MAX_TIME ;
 	}
 
-	template<class IA>
-	double scoreSolution(Solution& s) {
-		Game simulation = Game(*game) ;
-
-		IA ia = IA(&simulation, -1, !isOpp) ;
-
-		//si on ne joue pas l'adversaire
-		if(!isOpp) {
-			for(int i = 0 ; i < LENGTH ; ++i) {
-				Move* om = ia.computeMoves() ;
-				simulation.simulateNextTurn(s.solution[i], s.solution[i+LENGTH], om[0], om[1]) ;
-				delete[] om ;
-			}
-		}
-		//si on joue l'adversaire : l'IA joue notre rôle, la solution est appliquée à l'adv
-		else {
-			for(int i = 0 ; i < LENGTH ; ++i) {
-				Move* om = ia.computeMoves() ;
-				simulation.simulateNextTurn(om[0], om[1],s.solution[i], s.solution[i+LENGTH]) ;
-				delete[] om ;
-			}
-		}
-		s.setScore(simulation.evalGame(isOpp)) ;
-		return s.getScore() ;
-	}
-
-	double scoreSolution(Solution* s, Solution* os) {
+	void scoreSolution(Solution* s, Solution* os) {
 		Game simulation = Game(*game) ;
 
 		for(int i = 0 ; i < LENGTH ; ++i) {
 			simulation.simulateNextTurn(s->solution[i], s->solution[i+LENGTH], os->solution[i], os->solution[i+LENGTH]) ;
 		}
-		s->setScore(simulation.evalGame(isOpp)) ;
-		return s->getScore() ;
+		if(!isOpp) s->setScore(simulation.evalGame(false)) ;
+		else os->setScore(simulation.evalGame(true)) ;
 	}
 
 protected :
@@ -1073,7 +1037,7 @@ protected :
 
 class SimpleIA : public IA {
 public:
-	SimpleIA(Game* game, int max_time = DEFAULT_MAX_TIME, bool isOpp=false) : IA(game,max_time,isOpp) {
+	SimpleIA(Game* game, bool isOpp=false) : IA(game,0,isOpp) {
 		if(!isOpp) {
 			myPods = game->pods ;
 			oppPods = game->pods + 2 ;
@@ -1206,18 +1170,18 @@ public:
 				}
 		);
 
-		bool firstTurn = myPods[0].getChecked() < game->getCheckpointCount() &&
-				myPods[1].getChecked() < game->getCheckpointCount() ;
+		//bool firstTurn = myPods[0].getChecked() < game->getCheckpointCount() &&
+		//		myPods[1].getChecked() < game->getCheckpointCount() ;
 
 		double score0 = Game::scorePod(myPods) ;
 		double score1 = Game::scorePod(myPods + 1) ;
 
-		if(firstTurn) {
+		/*if(firstTurn) {
 			moves[0] = computeAMove(myPods) ;
 			moves[1] = computeAMove(myPods + 1) ;
 		}
-		else if(score0 > score1) {
-		//if(score0 > score1) {
+		else if(score0 > score1) {*/
+		if(score0 > score1) {
 			moves[0] = computeAMove(myPods) ;
 			moves[1] = computeBMove(myPods + 1, opp) ;
 		}
@@ -1232,27 +1196,34 @@ public:
 		return moves ;
 	}
 
-	Solution computeSolution() {
-		//on crée une simulation, et on sauvegarde l'état courant du jeu
-		Game simulation = Game(*game) ;
-		Game* saved = this->game ;
-		this->game = &simulation ;
+	template <class IA>
+	static Solution computeSolution(Game* g, bool isOpp){
+		Solution s ;
+		Game simulation(*g) ;
+		IA ia(&simulation, isOpp) ;
 
-		Solution s;
 		//simulation des tours consécutifs pour construction de la solution
-		for(int i = 0 ; i < LENGTH ; ++i) {
-			Move* m(this->computeMoves()) ;
-			s.solution[i] = m[0] ;
-			s.solution[i+LENGTH] = m[1] ;
-			game->simulateNextTurn(m[0], m[1], Move(0,0), Move(0,0)) ;
-			delete[] m ;
+		if(!isOpp) {
+			for(int i = 0 ; i < LENGTH ; ++i) {
+				Move* m(ia.computeMoves()) ;
+				s.solution[i] = m[0] ;
+				s.solution[i+LENGTH] = m[1] ;
+				simulation.simulateNextTurn(m[0], m[1], Move(0,0), Move(0,0)) ;
+				delete[] m ;
+			}
 		}
-
-		//on restaure l'état initial de game
-		this->game = saved ;
-
-		return s;
+		else {
+			for(int i = 0 ; i < LENGTH ; ++i) {
+				Move* m(ia.computeMoves()) ;
+				s.solution[i] = m[0] ;
+				s.solution[i+LENGTH] = m[1] ;
+				simulation.simulateNextTurn(Move(0,0), Move(0,0), m[0], m[1]) ;
+				delete[] m ;
+			}
+		}
+		return s ;
 	}
+
 protected:
 	Pod *myPods ;
 	Pod *oppPods ;
@@ -1261,7 +1232,7 @@ protected:
 //IA : the two pods try to race as fast as possible
 class RaceIA : public SimpleIA {
 public:
-	RaceIA(Game* game, int max_time = DEFAULT_MAX_TIME, bool isOpp=false) : SimpleIA(game, max_time, isOpp) {
+	RaceIA(Game* game, bool isOpp=false) : SimpleIA(game, isOpp) {
 
 	}
 	~RaceIA() { }
@@ -1280,7 +1251,7 @@ public:
 
 class BlockIA : public SimpleIA {
 public:
-	BlockIA(Game* game, int max_time = DEFAULT_MAX_TIME, bool isOpp=false) : SimpleIA(game, max_time, isOpp) {
+	BlockIA(Game* game, bool isOpp=false) : SimpleIA(game, isOpp) {
 
 	}
 	~BlockIA() { }
@@ -1304,30 +1275,16 @@ public:
 	}
 };
 
-//IA : dummy IA that does nothing
-class NullIA : public IA {
-public:
-	NullIA(Game* game, int max_time = DEFAULT_MAX_TIME, bool playOpp=false) : IA(game) { }
-
-	Solution computeSolution() {
-		return Solution() ;
-	}
-
-	Move* computeMoves() {
-		return new Move[2] ;
-	}
-
-};
-
 class SAIA : public IA {
 private:
 	const int NUM_ITERATION = 100 ; //number of iteration at each T°
 	const double alpha = 0.97 ; //temperature reduction at each iteration
 	const int INITIAL_TEMP = 100 ; //initial T°
 	const bool KEEP_BEST = false ;
-	long total_iterations ;
 
+	long total_iterations ;
 	bool hasBestSolution ;
+
 	Solution bestSolution ;
 
 	static bool acceptance(double oldValue, double newValue, double temp) {
@@ -1353,63 +1310,18 @@ public:
 		return total_iterations ;
 	}
 
-	/*
-	template<class IA, bool useCache>
-	double scoreSolution(Solution& s) {
-		int begin = 0 ;
-		Game* pgame = game ;
-		if(useCache) {
-			//the solution only differs by the mutated Move
-			begin = s.getSavedPosition() >= LENGTH ? s.getSavedPosition() - LENGTH : s.getSavedPosition() ;
-			int minCache = s.getMinCache() >= LENGTH ? s.getMinCache() - LENGTH : s.getMinCache() ;
-			if(minCache < begin) {
-				begin = minCache ;
-				s.resetMinCache() ;
-			}
-			if(begin > 0) pgame = cache + begin - 1 ;
-		}
-
-		Game simulation = Game(*pgame) ;
-		IA ia = IA(&simulation, -1, !isOpp) ;
-
-		//si on ne joue pas l'adversaire
-		if(!isOpp) {
-			for(int i = begin ; i < LENGTH ; ++i) {
-				Move* om = ia.computeMoves() ;
-				simulation.simulateNextTurn(s.solution[i], s.solution[i+LENGTH], om[0], om[1]) ;
-				cache[i] = simulation ;
-				delete[] om ;
-			}
-		}
-		//si on joue l'adversaire : l'IA joue notre rôle, la solution est appliquée à l'adv
-		else {
-			for(int i = begin ; i < LENGTH ; ++i) {
-				Move* om = ia.computeMoves() ;
-				simulation.simulateNextTurn(om[0], om[1],s.solution[i], s.solution[i+LENGTH]) ;
-				cache[i] = simulation ;
-				delete[] om ;
-			}
-		}
-		s.setScore(simulation.evalGame(isOpp)) ;
-
-		return s.getScore() ;
-	}*/
-
-
-	Solution computeSolution() {
+	Solution computeSolution(Solution& opponentSolution) {
 		double temp = INITIAL_TEMP ;
 
 		//initial solution building & scoring
 		if(!KEEP_BEST || !hasBestSolution) {
-			//currentSolution.reset(Solution::randomSolution()) ;
-			RaceIA ia = RaceIA(game) ;
-			bestSolution = ia.computeSolution() ;
-			this->scoreSolution<NullIA>(bestSolution);
+			bestSolution = SimpleIA::computeSolution<RaceIA>(game, isOpp) ;
+			this->scoreSolution(&bestSolution, &opponentSolution);
 			std::cerr << "Initial solution at temp " << temp << " with score " << bestSolution.getScore() << std::endl;
 		}
 		else {
 			bestSolution.shiftLeft() ;
-			this->scoreSolution<NullIA>(bestSolution) ;
+			this->scoreSolution(&bestSolution, &opponentSolution) ;
 			std::cerr << "Reusing best solution at temp " << temp << " with score " << bestSolution.getScore() << std::endl;
 		}
 
@@ -1423,8 +1335,8 @@ public:
 				currentSolution.mutate() ;
 				++total_iterations ;
 
-				//score the new solution against SimpleIA
-				this->scoreSolution<NullIA>(currentSolution);
+				//score the new solution
+				this->scoreSolution(&currentSolution, &opponentSolution);
 
 				//is new solution accepted ?
 				if(acceptance(currentSolution.getSavedScore(), currentSolution.getScore(), temp)) {
@@ -1442,8 +1354,8 @@ public:
 		return bestSolution ;
 	}
 
-	Move* computeMoves() {
-		Solution s = this->computeSolution() ;
+	Move* computeMoves(Solution& opponentSolution) {
+		Solution s = this->computeSolution(opponentSolution) ;
 		Move* moves = new Move[2] ;
 		moves[0] = s.solution[0] ;
 		moves[1] = s.solution[LENGTH] ;
@@ -1461,33 +1373,21 @@ int main()
     std::cin >> checkpointCount; std::cin.ignore();
 
     Game game(laps,checkpointCount) ;
-    Move* moves = nullptr ;
-
-    //SimpleIA ia(&game) ;
-    //RaceIA ia(&game) ;
     SAIA ia(&game) ;
+    Move* moves = nullptr ;
 
     // game loop
     while (1) {
     	game.readGame();
     	ia.resetTimer();
-    	moves = ia.computeMoves() ;
+    	Solution opponentSolution = SimpleIA::computeSolution<SimpleIA>(&game, true) ;
+    	moves = ia.computeMoves(opponentSolution) ;
 
     	std::cerr << "Time : " << ia.getElapsedTime() << std::endl ;
     	std::cerr << "Average # of iterations : " << ia.getTotalIterations() / game.turn << std::endl ;
 
- //   	std::cerr << "First move : " << currentSolution->solution[0] << std::endl ;
- ///   	std::cerr << "Second move : " << currentSolution->solution[LENGTH] << std::endl ;
-
-        // Write an action using cout. DON'T FORGET THE "<< endl"
-        // To debug: cerr << "Debug messages..." << endl;
-
-        // You have to output the target position
-        // followed by the power (0 <= power <= 200)
-        // i.e.: "x y power"
-
-//       	Game clone(game) ;
-//        clone.simulateNextTurn_ex(moves[0],moves[1],Move(0,80),Move(0,80));
+//     	Game clone(game) ;
+//      clone.simulateNextTurn_ex(moves[0],moves[1],Move(0,80),Move(0,80));
 
     	game.pods[0].output(moves[0]);
     	game.pods[1].output(moves[1]);
