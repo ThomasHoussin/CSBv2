@@ -1316,12 +1316,14 @@ public:
 		//initial solution building & scoring
 		if(!KEEP_BEST || !hasBestSolution) {
 			bestSolution = SimpleIA::computeSolution<RaceIA>(game, isOpp) ;
-			this->scoreSolution(&bestSolution, &opponentSolution);
+			if(!isOpp) this->scoreSolution(&bestSolution, &opponentSolution);
+			else this->scoreSolution(&opponentSolution,&bestSolution);
 			std::cerr << "Initial solution at temp " << temp << " with score " << bestSolution.getScore() << std::endl;
 		}
 		else {
 			bestSolution.shiftLeft() ;
-			this->scoreSolution(&bestSolution, &opponentSolution) ;
+			if(!isOpp) this->scoreSolution(&bestSolution, &opponentSolution);
+			else this->scoreSolution(&opponentSolution,&bestSolution);
 			std::cerr << "Reusing best solution at temp " << temp << " with score " << bestSolution.getScore() << std::endl;
 		}
 
@@ -1336,7 +1338,8 @@ public:
 				++total_iterations ;
 
 				//score the new solution
-				this->scoreSolution(&currentSolution, &opponentSolution);
+				if(!isOpp) this->scoreSolution(&currentSolution, &opponentSolution);
+				else this->scoreSolution(&opponentSolution, &currentSolution);
 
 				//is new solution accepted ?
 				if(acceptance(currentSolution.getSavedScore(), currentSolution.getScore(), temp)) {
@@ -1373,14 +1376,19 @@ int main()
     std::cin >> checkpointCount; std::cin.ignore();
 
     Game game(laps,checkpointCount) ;
-    SAIA ia(&game) ;
+    SAIA opponentIA(&game,45,true) ;
+    SAIA ia(&game,100) ;
     Move* moves = nullptr ;
 
     // game loop
     while (1) {
     	game.readGame();
+    	opponentIA.resetTimer() ;
+    	Solution basic = SimpleIA::computeSolution<SimpleIA>(&game, false) ;
+    	Solution opponentSolution = opponentIA.computeSolution(basic) ;
+
     	ia.resetTimer();
-    	Solution opponentSolution = SimpleIA::computeSolution<SimpleIA>(&game, true) ;
+    	//Solution opponentSolution = SimpleIA::computeSolution<SimpleIA>(&game, true) ;
     	moves = ia.computeMoves(opponentSolution) ;
 
     	std::cerr << "Time : " << ia.getElapsedTime() << std::endl ;
