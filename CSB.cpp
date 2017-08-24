@@ -22,8 +22,8 @@
 //shield activation probability
 #define ASHIELD 0.1
 //probability for max and min thrust
-#define MAXTHRUSTP 0.2
-#define MINTHRUSTP 0.2
+#define MAXTHRUSTP 0.15
+#define MINTHRUSTP 0.15
 //constant for collisions
 #define EPSILON 0.00001
 
@@ -56,8 +56,8 @@ private:
 	    engine = std::mt19937(seed); // seed the generator
 
 	    fdistribution = std::uniform_real_distribution<double>(0.0,1.0) ;
-	    angle_distribution = std::uniform_int_distribution<int>(-18,18) ;
-	    thrust_distribution = std::uniform_int_distribution<int>(0, 40) ;
+	    angle_distribution = std::uniform_int_distribution<int>(-9,9) ;
+	    thrust_distribution = std::uniform_int_distribution<int>(-20, 20) ;
 	    length_distribution = std::uniform_int_distribution<int>(0, 2 * LENGTH - 1) ;
 	}
 
@@ -88,7 +88,7 @@ public:
 
 class Move {
 public:
-	Move(double angle = 0., int thrust=0) :
+	Move(double angle = 0., int thrust=100) :
 		angle(angle), thrust(thrust)
 	{ }
 
@@ -108,23 +108,33 @@ public:
 		this->thrust = thrust;
 	}
 
+	//generate a neighbor move : the basic idea is to have a better neighborhood than just a random move, to help SA convergence
+	//we use a fixed probability for shield activation for the turn
+	//for thrust  : fixed probability for min and max thrust (fast chage is required for exemple when crossing CP)
+	//in other case, we use a random value ; this value is added to the current thrust
+	//for example : if thrust is 100, random value between -100 and 100, result will be between 0 and 200
+	//if thrust is 200, result will be between 100 and 200, with increased probability on 200
 	void mutate() {
 		Random &r = Random::getInstance() ;
 		double p = r.nextFloat() ;
 		if(p < ASHIELD) {
-			this->thrust = this->thrust == -1 ? r.nextRThrust() : -1 ;
+			this->thrust = -1 ;
 		}
-		else if(p < ASHIELD + MAXTHRUSTP)
-		{
-			this->thrust = 200;
+		else if(p < ASHIELD + MINTHRUSTP) {
+		    thrust = 0 ;
 		}
-		else if(p < ASHIELD + MAXTHRUSTP + MINTHRUSTP) {
-			this->thrust = 0 ;
+		else if(p < ASHIELD + MINTHRUSTP + MAXTHRUSTP) {
+		    thrust = 200 ;
 		}
 		else {
-			this->thrust = r.nextRThrust() ;
+			thrust += r.nextRThrust() ;
+			if(thrust > 200) thrust = 200 ;
+			else if(thrust < 0) thrust = 0 ;
 		}
-		this->angle = r.nextRAngle() ;
+
+		angle += r.nextRAngle() ;
+		if(angle > 18) angle = 18 ;
+		else if(angle < -18) angle = -18 ;
 	}
 
 	static Move randomMove() {
@@ -196,7 +206,7 @@ public:
 
 	void shiftLeft() {
 		std::copy(std::begin(this->solution)+1, std::end(this->solution),std::begin(this->solution)) ;
-		this->solution[LENGTH - 1] = Move(0,0) ;
+		this->solution[LENGTH - 1] = Move() ;
 	}
 
 	static Solution* randomSolution() {
@@ -778,13 +788,13 @@ public:
             int nextCheckPointId; // next check point id of your pod
             std::cin >> x >> y >> vx >> vy >> angle >> nextCheckPointId; std::cin.ignore();
 
-            if(pods[i].getAngle() == -1) {
+            //warning : if you play p2, input angle is not -1 for opponent angle
+            if(turn == 1) {
     			//if pod is not defined ; only on the first turn
                 pods[i].updatePod(x,y,vx,vy,angle,nextCheckPointId) ;
 
             	//on first turn, pod angle is calculated based on first direction
     			//to avoid having a different behavior on first turn, we set the angle to next CP
-                //warning : if p1, input angle = -1 ; if p2, angle = opponent angle
     			double startAngle = pods[i].computeAngle(checkpoints[pods[i].getNextCheckpointId()]) ;
     			pods[i].setAngle(startAngle) ;
             }
@@ -1279,7 +1289,7 @@ class SAIA : public IA {
 private:
 	const int NUM_ITERATION = 100 ; //number of iteration at each T°
 	const double alpha = 0.97 ; //temperature reduction at each iteration
-	const int INITIAL_TEMP = 100 ; //initial T°
+	const int INITIAL_TEMP = 10 ; //initial T°
 	const bool KEEP_BEST = false ;
 
 	long total_iterations ;
