@@ -251,13 +251,13 @@ public:
 	double distance(double x, double y) const {
 		return sqrt((this->x - x) * (this->x - x) + (this->y - y) * (this->y - y)) ;
 	}
-	double distance(const Point &p) {
+	double distance(const Point &p) const {
 		return this->distance(p.x, p.y) ;
 	}
 	double distanceSq(double x, double y) const {
 		return (this->x - x) * (this->x - x) + (this->y - y) * (this->y - y) ;
 	}
-	double distanceSq(const Point &p) {
+	double distanceSq(const Point &p) const {
 		return this->distanceSq(p.x, p.y) ;
 	}
 
@@ -1005,6 +1005,17 @@ int Game::checkpointCount = -1 ;
 int Game::totalChecked = -1 ;
 Checkpoint Game::checkpoints[8] ;
 
+//Comparison operator to rank pod : a < b -> a has a worse rank than b
+bool operator<(const Pod& a, const Pod& b) {
+	if(a.getChecked() < b.getChecked()) return true ;
+	else if(a.getChecked() > b.getChecked()) return false ;
+	else {
+		if(a.distanceSq(Game::checkpoints[a.getNextCheckpointId()]) > b.distanceSq(Game::checkpoints[b.getNextCheckpointId()]))
+			return true ;
+		else return false;
+	}
+}
+
 class IA {
 public:
 	Game* game ;
@@ -1174,24 +1185,9 @@ public:
 		Move* moves = new Move[2] ;
 
 		//best opponent
-		Pod* opp = std::max(oppPods,oppPods+1,
-				[this](Pod* a,Pod* b) {
-					return Game::scorePod(a) < Game::scorePod(b) ;
-				}
-		);
+		Pod* opp = std::max(oppPods,oppPods+1);
 
-		//bool firstTurn = myPods[0].getChecked() < game->getCheckpointCount() &&
-		//		myPods[1].getChecked() < game->getCheckpointCount() ;
-
-		double score0 = Game::scorePod(myPods) ;
-		double score1 = Game::scorePod(myPods + 1) ;
-
-		/*if(firstTurn) {
-			moves[0] = computeAMove(myPods) ;
-			moves[1] = computeAMove(myPods + 1) ;
-		}
-		else if(score0 > score1) {*/
-		if(score0 > score1) {
+		if(myPods[1] < myPods[0]) {
 			moves[0] = computeAMove(myPods) ;
 			moves[1] = computeBMove(myPods + 1, opp) ;
 		}
@@ -1398,7 +1394,6 @@ int main()
     	Solution opponentSolution = opponentIA.computeSolution(basic) ;
 
     	ia.resetTimer();
-    	//Solution opponentSolution = SimpleIA::computeSolution<SimpleIA>(&game, true) ;
     	moves = ia.computeMoves(opponentSolution) ;
 
     	std::cerr << "Time : " << ia.getElapsedTime() << std::endl ;
@@ -1409,6 +1404,7 @@ int main()
 
     	game.pods[0].output(moves[0]);
     	game.pods[1].output(moves[1]);
+
     	delete[] moves ;
     }
 
