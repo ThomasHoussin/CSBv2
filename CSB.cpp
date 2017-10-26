@@ -35,6 +35,35 @@ double exp(double x) {
 	  return x;
 }
 
+//array for precomputed trigo values
+double sinv[360] ;
+double cosv[360] ;
+
+//initialization function
+void trigo_initialize() {
+	for(int i = 0 ; i < 360 ; ++i) {
+		double k = i * M_PI / 180 ;
+		sinv[i] = sin(k) ;
+		cosv[i] = cos(k) ;
+	}
+}
+
+//trigo functions approximations
+//use of precomputed values seems to improve performance around 20-30%
+inline double sind(int x) {
+	return sinv[x] ;
+}
+inline double sind(double x) {
+	return sind((int)x) ;
+}
+
+inline double cosd(int x) {
+	return cosv[x] ;
+}
+inline double cosd(double x) {
+	return cosd((int)x) ;
+}
+
 //singleton class to handle random numbers
 class Random {
 private:
@@ -597,11 +626,13 @@ public:
 	    }
 
 	    // Conversion of the angle to radiants
-	    double ra = this->angle * M_PI / 180.0;
+	    //double ra = this->angle * M_PI / 180.0;
 
 	    // Trigonometry
-	    this->vx += cos(ra) * thrust;
-	    this->vy += sin(ra) * thrust;
+	    //this->vx += cos(ra) * thrust;
+	    //this->vy += sin(ra) * thrust;
+	    this->vx += cosd(this->angle) * thrust;
+	    this->vy += sind(this->angle) * thrust;
 	}
 
 	void move(double t) {
@@ -671,9 +702,13 @@ public:
 
 	    // Look for a point corresponding to the angle we want
 	    // Multiply to limit rounding errors
-	    a = a * M_PI / 180.0;
-	    double px = this->x + cos(a) * 100000.0;
-	    double py = this->y + sin(a) * 100000.0;
+	    //a = a * M_PI / 180.0;
+	    //double px = this->x + cos(a) * 100000.0;
+	    //double py = this->y + sin(a) * 100000.0;
+
+	    double px = this->x + cosd(a) * 100000.0;
+	    double py = this->y + sind(a) * 100000.0;
+
 
 	    if (move.getThrust() == -1) {
 	    	this->activeShield() ;
@@ -697,9 +732,9 @@ public:
 		 }
 		 // Look for a point corresponding to the angle we want
 		 // Multiply to limit rounding errors
-		 a = a * M_PI / 180.0;
-		 double px = round(this->x + cos(a) * 100000.0);
-		 double py = round(this->y + sin(a) * 100000.0);
+		 //a = a * M_PI / 180.0;
+		 double px = round(this->x + cosd(a) * 100000.0);
+		 double py = round(this->y + sind(a) * 100000.0);
 
 		return Point(px,py) ;
 	}
@@ -1384,6 +1419,8 @@ int main()
     std::cin >> laps; std::cin.ignore();
     int checkpointCount;
     std::cin >> checkpointCount; std::cin.ignore();
+
+    trigo_initialize() ;
 
     Game game(laps,checkpointCount) ;
     SAIA opponentIA(&game,45,true) ;
