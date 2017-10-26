@@ -42,7 +42,7 @@ double cosv[360] ;
 //initialization function
 void trigo_initialize() {
 	for(int i = 0 ; i < 360 ; ++i) {
-		double k = i * M_PI / 180 ;
+		double k = i * M_PI / 180.0 ;
 		sinv[i] = sin(k) ;
 		cosv[i] = cos(k) ;
 	}
@@ -641,10 +641,13 @@ public:
 	}
 
 	void endTurn() {
-	    this->x = round(this->x);
+	    /*this->x = round(this->x);
 	    this->y = round(this->y);
 	    this->vx = std::trunc(this->vx * 0.85);
-	    this->vy = std::trunc(this->vy * 0.85);
+	    this->vy = std::trunc(this->vy * 0.85);*/
+
+		this->vx = this->vx * 0.85 ;
+		this->vy = this->vy * 0.85 ;
 
 	    // Don't forget that the timeout goes down by 1 each turn. It is reset to 100 when you pass a checkpoint
 	    this->decTimeout() ;
