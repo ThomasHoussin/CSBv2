@@ -54,14 +54,14 @@ inline double sind(int x) {
 	return sinv[x] ;
 }
 inline double sind(double x) {
-	return sind((int)x) ;
+	return sind((int)(x+0.5d)) ;
 }
 
 inline double cosd(int x) {
 	return cosv[x] ;
 }
 inline double cosd(double x) {
-	return cosd((int)x) ;
+	return cosd((int)(x+0.5d)) ;
 }
 
 //singleton class to handle random numbers
@@ -646,8 +646,8 @@ public:
 	    this->vx = std::trunc(this->vx * 0.85);
 	    this->vy = std::trunc(this->vy * 0.85);*/
 
-		this->vx = this->vx * 0.85 ;
-		this->vy = this->vy * 0.85 ;
+	    this->vx = this->vx * 0.85 ;
+	    this->vy = this->vy * 0.85 ;
 
 	    // Don't forget that the timeout goes down by 1 each turn. It is reset to 100 when you pass a checkpoint
 	    this->decTimeout() ;
