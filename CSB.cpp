@@ -21,6 +21,10 @@
 #define MAX_DIST 3610000.0
 //shield activation probability
 #define ASHIELD 0.1
+//boost activation probability
+#define ABOOST 0.02
+//bonus for not using boost
+#define BBOOST 50.0
 //probability for max and min thrust
 #define MAXTHRUSTP 0.15
 #define MINTHRUSTP 0.15
@@ -54,14 +58,14 @@ inline double sind(int x) {
 	return sinv[x] ;
 }
 inline double sind(double x) {
-	return sind((int)(x+0.5d)) ;
+	return sind((int)(x+0.5)) ;
 }
 
 inline double cosd(int x) {
 	return cosv[x] ;
 }
 inline double cosd(double x) {
-	return cosd((int)(x+0.5d)) ;
+	return cosd((int)(x+0.5)) ;
 }
 
 //singleton class to handle random numbers
@@ -154,6 +158,9 @@ public:
 		}
 		else if(p < ASHIELD + MINTHRUSTP + MAXTHRUSTP) {
 		    thrust = 200 ;
+		}
+		else if(p < ASHIELD + MINTHRUSTP + MAXTHRUSTP + ABOOST) {
+		    thrust = 650 ;
 		}
 		else {
 			thrust += r.nextRThrust() ;
@@ -750,7 +757,7 @@ public:
 		if(this->getChecked() == max_checked) {
 			return (max_checked +1) * 100 - this->getFinishTime() ;
 		}
-		return this->getChecked() * 100 - this->distanceSq(*dest) / MAX_DIST - abs(this->diffSpeedAngle(*dest)) / 180.0  ;
+		return this->getChecked() * 100 - this->distanceSq(*dest) / MAX_DIST - abs(this->diffSpeedAngle(*dest)) / 180.0 + (this->hasBoost?1:0) * BBOOST ;
 
 		/*return this->getChecked() * 100 - this->distanceSq(*dest) / MAX_DIST
 				- std::min(abs(this->diffSpeedAngle(*dest)), abs(this->diffSpeedAngle(*nDest))) / 180.0 + speedSq / 100000000.0; */
@@ -841,6 +848,11 @@ public:
             	else pods[i].decTimeout() ;
             	pods[i].updatePod(x, y, vx, vy, angle, nextCheckPointId);
             	pods[i].decShield() ;
+            }
+
+            //inactivating boost for opponents
+            if(i== 2 || i == 3) {
+            	pods[i].useBoost() ;
             }
         }
 	}
