@@ -14,7 +14,7 @@
 #endif
 
 //default max time allowed for IA computing (in ms)
-#define DEFAULT_MAX_TIME 145
+#define DEFAULT_MAX_TIME 70
 //number of moves per pod in a solution
 #define LENGTH 6
 //max distance squared /100 on map, used for normalization
@@ -1438,8 +1438,8 @@ int main()
     trigo_initialize() ;
 
     Game game(laps,checkpointCount) ;
-    SAIA opponentIA(&game,45,true) ;
-    SAIA ia(&game,100) ;
+    SAIA opponentIA(&game,20,true) ;
+    SAIA ia(&game,50) ;
     Move* moves = nullptr ;
 
     // game loop
